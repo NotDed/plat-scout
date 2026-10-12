@@ -20,7 +20,7 @@ RANKINGS = {  # key -> (file, score field, label)
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SHADES = {"░": "#2b4a6b", "▒": "#5f8fbf", "▓": "#a8d8ff", "█": "#ffffff"}
-HERO_MIN_HEIGHT = 50  # terminal rows needed before the big plat art is shown
+HERO_MIN_HEIGHT = 42  # terminal rows needed before the plat art is shown
 
 ARROW = ["     ▄     ",
          "    ▄█▄    ",
@@ -79,9 +79,8 @@ class PlatScout(App):
     DataTable:focus { border: round #9fd8ff; }
     DataTable > .datatable--header { background: #141b2b; color: #9fd8ff; text-style: bold; }
     DataTable > .datatable--cursor { background: #1f6f4a; color: #ffffff; }
-    #side { width: 61; }
-    #hero { height: 33; border: round #2a3550; padding: 0 1; content-align: center middle; }
-    #side.compact { width: 44; }
+    #side { width: 44; }
+    #hero { height: 17; border: round #2a3550; content-align: center middle; }
     #side.compact #hero { display: none; }
     #detail { height: 1fr; border: round #2a3550; padding: 1 2; }
     """
@@ -116,8 +115,8 @@ class PlatScout(App):
         yield Footer()
 
     def on_resize(self, event):
-        # the big plat art only fits on tall, wide terminals
-        tall = event.size.height >= HERO_MIN_HEIGHT and event.size.width >= 150
+        # the plat art only fits on tall enough terminals
+        tall = event.size.height >= HERO_MIN_HEIGHT and event.size.width >= 120
         self.query_one("#side").set_class(not tall, "compact")
 
     def on_mount(self):

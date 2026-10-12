@@ -20,8 +20,6 @@ RANKINGS = {  # key -> (file, score field, label)
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SHADES = {"░": "#2b4a6b", "▒": "#5f8fbf", "▓": "#a8d8ff", "█": "#ffffff"}
-HERO_MIN_HEIGHT = 42  # terminal rows needed before the plat art is shown
-
 ARROW = ["     ▄     ",
          "    ▄█▄    ",
          "   ▄███▄   ",
@@ -29,29 +27,38 @@ ARROW = ["     ▄     ",
          " ▀▀▀███▀▀▀ ",
          "    ███    ",
          "    ███    "]
+ARROW_SHADES = ["#b8ffd6", "#7cf0ac", "#5ae896", "#3ddc84", "#2fb36b", "#26935a", "#1f7a4b"]
+ARROW_OVERLAP = 6  # columns of the arrow that sit on top of the plat
 
 
-def build_arrow():
-    shades = ["#b8ffd6", "#7cf0ac", "#5ae896", "#3ddc84", "#2fb36b", "#26935a", "#1f7a4b"]
-    art = Text(no_wrap=True, overflow="crop")
-    for row, (line, shade) in enumerate(zip(ARROW, shades)):
-        art.append(line, style=f"bold {shade}")
-        if row < len(ARROW) - 1:
-            art.append("\n")
-    return art
-
-
-def build_plat():
-    """The platinum artwork from assets/plat.txt, colored by shade character."""
-    art = Text(no_wrap=True, overflow="crop")
+def build_logo():
+    """The platinum artwork from assets/plat.txt with the green arrow
+    overlapping its bottom-right edge."""
     try:
-        lines = (ASSETS / "plat.txt").read_text(encoding="utf-8").splitlines()
+        plat = (ASSETS / "plat.txt").read_text(encoding="utf-8").splitlines()
     except OSError:
-        return art
-    for row, line in enumerate(lines):
-        for ch in line:
-            art.append(ch, style=SHADES.get(ch, ""))
-        if row < len(lines) - 1:
+        plat = []
+    plat_w = max((len(line) for line in plat), default=0)
+    ox = max(plat_w - ARROW_OVERLAP, 0)  # arrow column offset
+    oy = max(len(plat) - len(ARROW), 0)  # arrow sits at the bottom
+    width = max(plat_w, ox + len(ARROW[0]))
+    height = max(len(plat), oy + len(ARROW))
+
+    # canvas of (char, style): plat first, then the arrow painted over it
+    cells = [[(" ", "")] * width for _ in range(height)]
+    for y, line in enumerate(plat):
+        for x, ch in enumerate(line):
+            cells[y][x] = (ch, SHADES.get(ch, ""))
+    for y, line in enumerate(ARROW):
+        for x, ch in enumerate(line):
+            if ch != " ":
+                cells[oy + y][ox + x] = (ch, f"bold {ARROW_SHADES[y]}")
+
+    art = Text(no_wrap=True, overflow="crop")
+    for y, row in enumerate(cells):
+        for ch, style in row:
+            art.append(ch, style=style)
+        if y < height - 1:
             art.append("\n")
     return art
 
@@ -69,9 +76,9 @@ class PlatScout(App):
     TITLE = "plat-scout"
     CSS = """
     Screen { background: #0b0f17; }
-    #top { height: 9; padding: 1 2 0 2; }
-    #art { width: 13; padding: 0 0 0 1; }
-    #headline { width: 1fr; padding: 1 0 0 2; }
+    #top { height: 17; padding: 1 2 0 2; }
+    #art { width: 36; }
+    #headline { width: 1fr; padding: 4 0 0 2; }
     #search { display: none; margin: 0 2; border: tall #3ddc84; }
     #search.shown { display: block; }
     #body { height: 1fr; padding: 0 1; }
@@ -80,8 +87,6 @@ class PlatScout(App):
     DataTable > .datatable--header { background: #141b2b; color: #9fd8ff; text-style: bold; }
     DataTable > .datatable--cursor { background: #1f6f4a; color: #ffffff; }
     #side { width: 44; }
-    #hero { height: 17; border: round #2a3550; content-align: center middle; }
-    #side.compact #hero { display: none; }
     #detail { height: 1fr; border: round #2a3550; padding: 1 2; }
     """
     BINDINGS = [
@@ -104,20 +109,14 @@ class PlatScout(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
-            yield Static(build_arrow(), id="art")
+            yield Static(build_logo(), id="art")
             yield Static(id="headline")
         yield Input(placeholder="filter by name…  (esc to clear)", id="search")
         with Horizontal(id="body"):
             yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="side"):
-                yield Static(build_plat(), id="hero")
                 yield Static(id="detail")
         yield Footer()
-
-    def on_resize(self, event):
-        # the plat art only fits on tall enough terminals
-        tall = event.size.height >= HERO_MIN_HEIGHT and event.size.width >= 120
-        self.query_one("#side").set_class(not tall, "compact")
 
     def on_mount(self):
         self.query_one(DataTable).add_columns(

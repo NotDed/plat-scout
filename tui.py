@@ -18,15 +18,10 @@ RANKINGS = {  # key -> (file, score field, label)
     "volume": ("sell-candidates-volume.json", "volumeScore", "your copies × trades per day"),
 }
 
-# Warframe's platinum crystal with an arrow going up, built line by line so
-# every row has the same width.
-PLAT = ["        ▄█▄        ",
-        "      ▄█▀ ▀█▄      ",
-        "    ▄█▀ ▄█▄ ▀█▄    ",
-        "   ██  ██◆██  ██   ",
-        "    ▀█▄ ▀█▀ ▄█▀    ",
-        "      ▀█▄ ▄█▀      ",
-        "        ▀█▀        "]
+ASSETS = Path(__file__).resolve().parent / "assets"
+SHADES = {"░": "#2b4a6b", "▒": "#5f8fbf", "▓": "#a8d8ff", "█": "#ffffff"}
+HERO_MIN_HEIGHT = 50  # terminal rows needed before the big plat art is shown
+
 ARROW = ["     ▄     ",
          "    ▄█▄    ",
          "   ▄███▄   ",
@@ -34,20 +29,29 @@ ARROW = ["     ▄     ",
          " ▀▀▀███▀▀▀ ",
          "    ███    ",
          "    ███    "]
-PLAT_INNER = {(2, 8), (2, 9), (2, 10), (3, 7), (3, 8), (3, 9), (3, 10), (3, 11),
-              (4, 8), (4, 9), (4, 10)}
 
 
-def build_art():
+def build_arrow():
+    shades = ["#b8ffd6", "#7cf0ac", "#5ae896", "#3ddc84", "#2fb36b", "#26935a", "#1f7a4b"]
     art = Text(no_wrap=True, overflow="crop")
-    for row, (plat, arrow) in enumerate(zip(PLAT, ARROW)):
-        for col, ch in enumerate(plat):
-            inner = (row, col) in PLAT_INNER
-            art.append(ch, style="bold #ffffff" if inner else "bold #9fd8ff")
-        art.append("  ")
-        shade = ["#b8ffd6", "#7cf0ac", "#5ae896", "#3ddc84", "#2fb36b", "#26935a", "#1f7a4b"][row]
-        art.append(arrow, style=f"bold {shade}")
-        if row < len(PLAT) - 1:
+    for row, (line, shade) in enumerate(zip(ARROW, shades)):
+        art.append(line, style=f"bold {shade}")
+        if row < len(ARROW) - 1:
+            art.append("\n")
+    return art
+
+
+def build_plat():
+    """The platinum artwork from assets/plat.txt, colored by shade character."""
+    art = Text(no_wrap=True, overflow="crop")
+    try:
+        lines = (ASSETS / "plat.txt").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return art
+    for row, line in enumerate(lines):
+        for ch in line:
+            art.append(ch, style=SHADES.get(ch, ""))
+        if row < len(lines) - 1:
             art.append("\n")
     return art
 
@@ -65,8 +69,8 @@ class PlatScout(App):
     TITLE = "plat-scout"
     CSS = """
     Screen { background: #0b0f17; }
-    #top { height: 10; padding: 1 2 0 2; }
-    #art { width: 36; }
+    #top { height: 9; padding: 1 2 0 2; }
+    #art { width: 13; padding: 0 0 0 1; }
     #headline { width: 1fr; padding: 1 0 0 2; }
     #search { display: none; margin: 0 2; border: tall #3ddc84; }
     #search.shown { display: block; }
@@ -75,7 +79,11 @@ class PlatScout(App):
     DataTable:focus { border: round #9fd8ff; }
     DataTable > .datatable--header { background: #141b2b; color: #9fd8ff; text-style: bold; }
     DataTable > .datatable--cursor { background: #1f6f4a; color: #ffffff; }
-    #detail { width: 1fr; min-width: 34; border: round #2a3550; padding: 1 2; }
+    #side { width: 61; }
+    #hero { height: 33; border: round #2a3550; padding: 0 1; content-align: center middle; }
+    #side.compact { width: 44; }
+    #side.compact #hero { display: none; }
+    #detail { height: 1fr; border: round #2a3550; padding: 1 2; }
     """
     BINDINGS = [
         Binding("m", "kind('mods')", "Mods"),
@@ -97,13 +105,20 @@ class PlatScout(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
-            yield Static(build_art(), id="art")
+            yield Static(build_arrow(), id="art")
             yield Static(id="headline")
         yield Input(placeholder="filter by name…  (esc to clear)", id="search")
         with Horizontal(id="body"):
             yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
-            yield Static(id="detail")
+            with Vertical(id="side"):
+                yield Static(build_plat(), id="hero")
+                yield Static(id="detail")
         yield Footer()
+
+    def on_resize(self, event):
+        # the big plat art only fits on tall, wide terminals
+        tall = event.size.height >= HERO_MIN_HEIGHT and event.size.width >= 150
+        self.query_one("#side").set_class(not tall, "compact")
 
     def on_mount(self):
         self.query_one(DataTable).add_columns(

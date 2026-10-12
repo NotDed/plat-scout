@@ -8,12 +8,14 @@ Python 3 standard library only, no dependencies.
 
 ## Steps
 
-1. **Get your inventory** (game running and logged in). Download
-   [warframe-api-helper](https://github.com/Sainan/warframe-api-helper/releases)
-   (there is a Linux build), then:
+1. **Get your inventory** (game running and logged in):
    ```
-   python3 fetch_inventory.py --helper /path/to/warframe-api-helper
+   python3 fetch_inventory.py
    ```
+   It reads your session token from the game's memory (same method as
+   [warframe-api-helper](https://github.com/Sainan/warframe-api-helper), rewritten
+   in Python) and downloads the inventory. If you get "permission denied", run it
+   with `sudo` once.
 2. **Split it into mods and arcanes:**
    ```
    python3 extract.py

@@ -71,6 +71,11 @@ def cmd_top(a):
               f"{c['averagePrice']:>6}  {c['tradesPerDay']:>6}  {c['yourCopies']:>4}  {c['action']}")
 
 
+def cmd_tui(a):
+    import tui  # textual is only needed for this command
+    tui.run()
+
+
 def cmd_run(a):
     cmd_fetch(a)
     cmd_extract(a)
@@ -108,6 +113,9 @@ def main():
     s.add_argument("-n", type=int, default=15, help="how many rows (default 15)")
     s.add_argument("--quick", action="store_true", help="hide options that need ranking up or fusing")
     s.set_defaults(func=cmd_top)
+
+    s = sub.add_parser("tui", help="browse the rankings in an interactive terminal UI")
+    s.set_defaults(func=cmd_tui)
 
     a = p.parse_args()
     a.func(a)

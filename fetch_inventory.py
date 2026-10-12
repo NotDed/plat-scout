@@ -85,7 +85,11 @@ def main():
         sys.exit(__doc__)
     if args and (args[0] != "--auth" or len(args) != 2):
         sys.exit(__doc__)
-    auth = args[1].replace("&amp;", "&") if args else token_from_game()
+    fetch(args[1] if args else None)
+
+
+def fetch(auth=None):
+    auth = auth.replace("&amp;", "&") if auth else token_from_game()
     print("got session token, downloading inventory...")
 
     DATA.mkdir(exist_ok=True)

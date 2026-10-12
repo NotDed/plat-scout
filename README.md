@@ -6,27 +6,39 @@ how many copies you own.
 
 Python 3 standard library only, no dependencies.
 
-## Steps
+## Install
 
-1. **Get your inventory** (game running and logged in):
-   ```
-   python3 fetch_inventory.py
-   ```
-   It reads your session token from the game's memory (same method as
-   [warframe-api-helper](https://github.com/Sainan/warframe-api-helper), rewritten
-   in Python) and downloads the inventory. If you get "permission denied", run it
-   with `sudo` once.
-2. **Split it into mods and arcanes:**
-   ```
-   python3 extract.py
-   ```
-3. **Price them** (about 2.3 s per item: ~15 min for mods, ~2.5 min for arcanes):
-   ```
-   python3 prices.py data/mods.json
-   python3 prices.py data/arcanes.json
-   ```
-   The ranking files are rewritten after every item, so you can open them while
-   the scan runs.
+```
+uv tool install -e .      # or: pipx install -e .
+```
+
+This adds a `plat-scout` command. Data stays in this repo's `data/` folder.
+
+## Usage
+
+```
+plat-scout run                 # fetch + extract + prices, everything (~18 min)
+plat-scout top                 # best 15 mods to sell, by plat from your copies
+plat-scout top --quick         # only ones you can sell right now (no ranking up)
+plat-scout top arcanes --by market -n 30
+```
+
+Step by step:
+
+| Command | What it does |
+|---|---|
+| `plat-scout fetch` | download your inventory (game running and logged in) |
+| `plat-scout extract` | split it into `mods.json` and `arcanes.json` |
+| `plat-scout prices [mods\|arcanes]` | scan warframe.market (~2.3 s per item) |
+| `plat-scout rank` | rebuild rankings from saved prices, no API calls |
+| `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
+
+`fetch` reads your session token from the game's memory (same method as
+[warframe-api-helper](https://github.com/Sainan/warframe-api-helper), rewritten
+in Python). If you get "permission denied", run it with `sudo` once.
+
+The ranking files are rewritten after every item during `prices`, so you can
+open them while the scan runs.
 
 ## Output (in `data/`)
 
@@ -39,10 +51,8 @@ Python 3 standard library only, no dependencies.
 
 Arcanes produce the same files with an `arcane-` prefix.
 
-## Options
-
-- `--all-sellers`: count offline sellers too (default: only online/in-game).
-- `--from-prices`: re-rank from an existing prices file without calling the API.
+`--all-sellers` on `prices`/`run` counts offline sellers too (default: only
+online/in-game).
 
 ## Notes
 

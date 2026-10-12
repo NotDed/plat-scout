@@ -176,15 +176,19 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    all_sellers = "--all-sellers" in sys.argv
-    mods_path = Path(args[0] if args else Path(__file__).resolve().parent / "data" / "mods.json").expanduser()
+    run(Path(args[0]) if args else Path(__file__).resolve().parent / "data" / "mods.json",
+        all_sellers="--all-sellers" in sys.argv, from_prices="--from-prices" in sys.argv)
+
+
+def run(mods_path, all_sellers=False, from_prices=False):
+    mods_path = Path(mods_path).expanduser()
     out_dir = mods_path.parent
     # mods.json -> mod-prices.json + sell-candidates*.json (original names)
     # arcanes.json -> arcane-prices.json + arcane-sell-candidates*.json
     prefix = "" if mods_path.stem == "mods" else mods_path.stem.rstrip("s") + "-"
     prices_name = "mod-prices" if not prefix else f"{prefix}prices"
 
-    if "--from-prices" in sys.argv:
+    if from_prices:
         # re-rank from a finished mod-prices.json without calling the API
         results = json.load(open(out_dir / f"{prices_name}.json"))
         write_candidates(out_dir, results, f"{len(results)}/{len(results)} checked", prefix)

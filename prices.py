@@ -59,10 +59,25 @@ def stats(prices):
             "sellers": len(prices)}
 
 
-def trades_per_day(slug, ranks, subtype=None):
-    """Average closed trades per day over the 90-day window, keyed by rank."""
+# Void Traces to refine a relic from intact to each level.
+REFINE_TRACES = {"intact": 0, "exceptional": 25, "flawless": 50, "radiant": 100}
+
+
+def closed_days(slug):
+    """Daily closed-trade statistics for the last 90 days."""
     data = get(f"/items/{slug}/statistics", base=API_V1, key="payload")
-    days = (data or {}).get("statistics_closed", {}).get("90days", [])
+    return (data or {}).get("statistics_closed", {}).get("90days", [])
+
+
+def sold_price(days, subtype):
+    """Volume-weighted average price actually traded over 90 days, or None."""
+    rows = [d for d in days if d.get("subtype") == subtype and d.get("volume")]
+    total = sum(d["volume"] for d in rows)
+    return round(sum(d["avg_price"] * d["volume"] for d in rows) / total, 1) if total else None
+
+
+def trades_per_day(days, ranks, subtype=None):
+    """Average closed trades per day over the 90-day window, keyed by rank."""
     out = {r: 0 for r in ranks}
     for d in days:
         if subtype and d.get("subtype", subtype) != subtype:
@@ -125,6 +140,14 @@ def candidates_all(results):
                     options.append((f"rank to {r['maxRank']} first, then sell", b, r["ownedRank0"]))
         if r["ownedMax"] and r["maxRank"]:
             options.append((f"sell at rank {r['maxRank']} (already maxed)", b, r["ownedMax"]))
+        refs = r.get("refinements")
+        if refs and r["ownedRank0"] and r.get("subtype") in refs:
+            # relics: is refining before selling worth the Void Traces?
+            now = REFINE_TRACES[r["subtype"]]
+            for sub, p in refs.items():
+                if REFINE_TRACES[sub] > now and p["lowest"] and (not a["lowest"] or p["lowest"] > a["lowest"]):
+                    options.append((f"refine to {sub} ({REFINE_TRACES[sub] - now} traces), then sell",
+                                    p, r["ownedRank0"]))
         for action, p, copies in options:
             if not p["lowest"] or p["lowest"] < MIN_PRICE or p["tradesPerDay"] < MIN_TRADES:
                 continue
@@ -132,7 +155,8 @@ def candidates_all(results):
                         "averagePrice": p["average"], "tradesPerDay": p["tradesPerDay"],
                         "onlineSellers": p["sellers"], "yourCopies": copies,
                         "score": round(p["lowest"] * p["tradesPerDay"], 1),
-                        "url": f"https://warframe.market/items/{r['slug']}"})
+                        "url": f"https://warframe.market/items/{r['slug']}",
+                        **({"refinements": refs} if refs else {})})
     out.sort(key=lambda c: -c["score"])
     return out
 
@@ -228,15 +252,34 @@ def run(mods_path, all_sellers=False, from_prices=False):
                  and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
         r0 = [x["platinum"] for x in sells if x.get("rank", 0) == 0]
         rmax = [x["platinum"] for x in sells if x.get("rank", 0) == max_rank]
-        volume = trades_per_day(item["slug"], {0, max_rank}, o["subtype"])
+        days = closed_days(item["slug"])
+        volume = trades_per_day(days, {0, max_rank}, o["subtype"])
         time.sleep(DELAY)
+        refinements = None
+        if o["subtype"] in REFINE_TRACES:  # relic: price every refinement level
+            online = [x for x in orders if x["type"] == "sell" and x.get("visible", True)
+                      and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
+            refinements = {}
+            for sub in item.get("subtypes", []):
+                if sub not in REFINE_TRACES:
+                    continue
+                st = stats([x["platinum"] for x in online if x.get("subtype") == sub])
+                st["soldAvg"] = sold_price(days, sub)
+                if st["lowest"] is None and st["soldAvg"]:
+                    # nobody online selling this level: fall back to what it sold for
+                    st["lowest"] = st["average"] = round(st["soldAvg"])
+                    st["fromHistory"] = True
+                st["tradesPerDay"] = trades_per_day(days, {0}, sub)[0]
+                refinements[sub] = st
         results.append({"name": o["name"], "slug": item["slug"], "owned": o["owned"],
                         "ownedRank0": o["ranks"].get(0, 0),
                         "ownedMax": o["ranks"].get(max_rank, 0) if max_rank else 0,
                         "maxRank": max_rank,
                         "isArcane": "arcane_enhancement" in item.get("tags", []),
                         "rank0": {**stats(r0), "tradesPerDay": volume[0]},
-                        "maxRankPrice": {**stats(rmax), "tradesPerDay": volume[max_rank]}})
+                        "maxRankPrice": {**stats(rmax), "tradesPerDay": volume[max_rank]},
+                        **({"subtype": o["subtype"], "refinements": refinements}
+                           if refinements else {})})
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)
     print()
 

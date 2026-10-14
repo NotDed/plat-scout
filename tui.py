@@ -172,7 +172,7 @@ class PlatScout(App):
     def visible(self):
         rows = self.meta.get("candidates", [])
         if self.quick:
-            rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse"))]
+            rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse", "refine"))]
         if self.search_text:
             rows = [c for c in rows if self.search_text.lower() in c["name"].lower()]
         return rows
@@ -187,7 +187,7 @@ class PlatScout(App):
         for i, c in enumerate(self.rows, 1):
             heat = c[field] / top
             color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
-            action_color = "#ff9f5a" if c["action"].startswith(("rank to", "fuse")) else "#3ddc84"
+            action_color = "#ff9f5a" if c["action"].startswith(("rank to", "fuse", "refine")) else "#3ddc84"
             table.add_row(
                 Text(str(i), style="#5b6680"),
                 Text(c["name"], style="bold #e8eefc"),
@@ -227,6 +227,15 @@ class PlatScout(App):
         if "potentialPlat" in c:
             extra = (f"\n[#8a93a6]sellable in 7 days[/]  {c['sellableIn7Days']}"
                      f"\n[#8a93a6]potential[/]           [b #3ddc84]{c['potentialPlat']:,}p[/]")
+        refs = c.get("refinements")
+        if refs:
+            extra += "\n\n[b #9fd8ff]refinement   price    avg   /day[/]"
+            for sub, p in refs.items():
+                low = f"{p['lowest']}p" if p["lowest"] else "-"
+                if p.get("fromHistory"):
+                    low = "~" + low  # no one online: price from past sales
+                avg = f"{p['average']}p" if p["average"] else "-"
+                extra += f"\n[#8a93a6]{sub:<12}[/] {low:>6} {avg:>6} {p['tradesPerDay']:>6}"
         box.update(markup(
             f"[b #e8eefc]{c['name']}[/]\n"
             f"[#ff9f5a]{c['action']}[/]\n\n"
@@ -235,8 +244,10 @@ class PlatScout(App):
             f"[#8a93a6]online sellers[/]      {c['onlineSellers']}\n"
             f"[#8a93a6]trades per day[/]      {c['tradesPerDay']}\n"
             f"[#8a93a6]your copies[/]         {c['yourCopies']}"
-            f"{extra}\n\n"
-            f"[#5b6680]press [b]o[/b] to open on warframe.market[/]"))
+            f"{extra}"
+            + ("\n[#5b6680]~ = no one online, price from past 90 days of sales[/]"
+               if refs and any(p.get("fromHistory") for p in refs.values()) else "")
+            + f"\n\n[#5b6680]press [b]o[/b] to open on warframe.market[/]"))
 
     # ---- events -----------------------------------------------------------
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):

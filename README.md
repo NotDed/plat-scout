@@ -62,6 +62,10 @@ online/in-game).
 
 - Trade volume comes from warframe.market's v1 statistics endpoint (90 days);
   everything else uses the v2 API.
+- Relics are priced at every refinement (intact → radiant). If a refined level
+  sells for more, you get a "refine to X (N traces), then sell" option. When no
+  one is online selling a level, its price comes from the last 90 days of sales
+  (shown with `~` in the TUI).
 - Rivens are skipped: they trade on the separate riven auction market.
 - Built frames and weapons are skipped: only loose parts and blueprints can be
   traded. Resources (Ferrite, Rubedo...) aren't tradable either.

@@ -58,7 +58,7 @@ def cmd_top(a):
     data = json.load(open(path))
     rows = data["candidates"]
     if a.quick:
-        rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse"))]
+        rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse", "refine"))]
     rows = rows[:a.n]
 
     print(f"{a.kind} by {a.by}: {data['score']}  ({data['progress']}, {data['updated']})")

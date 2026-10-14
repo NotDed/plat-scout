@@ -4,15 +4,19 @@ import asyncio
 import json
 import re
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.screen import ModalScreen
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual import work
 from textual.widgets import DataTable, Footer, Input, ProgressBar, Static
+
+import listing
 
 REPO = Path(__file__).resolve().parent
 DATA = REPO / "data"
@@ -90,6 +94,112 @@ def markup(s):
     return Text.from_markup(s, overflow="crop")
 
 
+class ReviewScreen(ModalScreen):
+    """Shows exactly what would be listed on warframe.market; posts only on y."""
+    CSS = """
+    ReviewScreen { align: center middle; background: #0b0f17 70%; }
+    #review { width: 110; height: auto; max-height: 90%; border: round #3ddc84;
+              background: #0f1522; padding: 1 2; }
+    #review-body { height: auto; }
+    #token { margin: 1 0 0 0; border: tall #e3c75b; }
+    """
+    BINDINGS = [Binding("y", "post", "Post"), Binding("p", "pricing", "Pricing"),
+                Binding("escape", "dismiss", "Cancel")]
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows, self.pricing, self.plans, self.user, self.busy = rows, "match", [], None, False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="review"):
+            yield Static(id="review-body")
+            yield Input(placeholder="paste your warframe.market JWT cookie here, then Enter",
+                        password=True, id="token")
+
+    def on_mount(self):
+        self.query_one("#token").display = False
+        self.refresh_plan()
+
+    @work(exclusive=True, thread=True)
+    def refresh_plan(self):
+        body = self.query_one("#review-body", Static)
+        self.app.call_from_thread(body.update, markup("[#8a93a6]checking your account…[/]"))
+        try:
+            self.user = listing.me() if listing.load_token() else None
+        except listing.WfmError as e:
+            self.user = None
+            self.app.call_from_thread(self.notify, str(e), severity="error")
+        self.plans = listing.plan(self.rows, self.pricing)
+        self.app.call_from_thread(self.draw)
+
+    def draw(self):
+        token_box = self.query_one("#token")
+        token_box.display = not self.user
+        if not self.user:
+            token_box.focus()
+        who = (f"[b #3ddc84]{self.user.get('ingameName', '?')}[/]" if self.user
+               else "[#ff6b6b]not logged in[/] [#8a93a6]- paste your token below[/]")
+        lines = [f"[b #e8eefc]Post to warframe.market[/]   as {who}",
+                 f"[#8a93a6]pricing:[/] [b #e3c75b]{listing.PRICING[self.pricing]}[/]"
+                 f" [#5b6680](p to change)[/]",
+                 "", f"[b #9fd8ff]{'item':<34} {'rank':>4} {'qty':>4} {'price':>7}  what happens[/]"]
+        ready = 0
+        for p in self.plans:
+            if "skip" in p:
+                lines.append(f"[#5b6680]{p['name'][:34]:<34} {'':>4} {'':>4} {'':>7}"
+                             f"  skipped: {p['skip']}[/]")
+                continue
+            o, old = p["order"], p.get("existing")
+            what = (f"[#e3c75b]update {old['platinum']}p -> {o['platinum']}p[/]" if old
+                    else "[#3ddc84]new listing[/]")
+            if "already maxed" in p["action"]:
+                what += " [#ff9f5a](equipped? check first)[/]"
+            sub = o.get("subtype")
+            name = p["name"] + (f" ({sub})" if sub and sub not in ("intact", "regular")
+                                and sub not in p["name"] else "")
+            lines.append(f"{name[:34]:<34} {o.get('rank', '')!s:>4} {o['quantity']:>4}"
+                         f" {o['platinum']:>6}p  {what}")
+            ready += 1
+        lines += ["", f"[b #3ddc84]y[/] post {ready} listing(s)   [b]p[/] pricing   [b]esc[/] cancel"
+                  if self.user and ready else "[b]esc[/] close"]
+        self.query_one("#review-body", Static).update(markup("\n".join(lines)))
+
+    def on_input_submitted(self, event: Input.Submitted):
+        listing.save_token(event.value)
+        event.input.value = ""
+        self.refresh_plan()
+
+    def action_pricing(self):
+        keys = list(listing.PRICING)
+        self.pricing = keys[(keys.index(self.pricing) + 1) % len(keys)]
+        self.refresh_plan()
+
+    def action_post(self):
+        if self.user and not self.busy and any("order" in p for p in self.plans):
+            self.busy = True
+            self.post_all()
+
+    @work(exclusive=True, thread=True)
+    def post_all(self):
+        ok, failed = 0, []
+        todo = [p for p in self.plans if "order" in p]
+        body = self.query_one("#review-body", Static)
+        for n, p in enumerate(todo, 1):
+            self.app.call_from_thread(body.update,
+                                      markup(f"[#3ddc84]posting {n}/{len(todo)}[/]  {p['name']}"))
+            try:
+                listing.post(p)
+                ok += 1
+            except listing.WfmError as e:
+                failed.append(f"{p['name']}: {e}")
+            time.sleep(0.4)  # stay under the market's rate limit
+        msg = f"posted {ok} listing(s)" + (f", {len(failed)} failed: " + "; ".join(failed[:3])
+                                            if failed else "")
+        self.app.call_from_thread(self.app.notify, msg,
+                                  severity="error" if failed else "information", timeout=12)
+        self.app.call_from_thread(self.dismiss)
+
+
 class PlatScout(App):
     TITLE = "plat-scout"
     CSS = """
@@ -123,6 +233,8 @@ class PlatScout(App):
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
+        Binding("space", "toggle_select", "Select", show=False),
+        Binding("l", "list_selected", "List on market"),
         Binding("s", "scan", "Scan tab"),
         Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
@@ -136,6 +248,7 @@ class PlatScout(App):
         self.kind, self.ranking, self.quick, self.search_text = "mods", "owned", False, ""
         self.rows, self.meta, self.mtime = [], {}, None
         self.proc = None  # running scan / fetch subprocess
+        self.selected = set()  # (name, action) of rows marked with space
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -211,7 +324,9 @@ class PlatScout(App):
             color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
             action_color = "#ff9f5a" if c["action"].startswith(NEEDS_WORK) else "#3ddc84"
             table.add_row(
-                Text(str(i), style="#5b6680"),
+                Text("●" if (c["name"], c["action"]) in self.selected else str(i),
+                     style="bold #3ddc84" if (c["name"], c["action"]) in self.selected
+                     else "#5b6680"),
                 Text(c["name"], style="bold #e8eefc"),
                 Text(f"{c[field] or 0:,}", style=f"bold {color}", justify="right"),
                 Text(plat(c.get("lowestPrice")), style="#9fd8ff", justify="right"),
@@ -306,7 +421,7 @@ class PlatScout(App):
             f"{extra}"
             + ("\n[#5b6680]~ = no one online, price from past 90 days of sales[/]"
                if refs and any(p.get("fromHistory") for p in refs.values()) else "")
-            + f"\n\n[#5b6680]press [b]o[/b] to open on warframe.market[/]"))
+            + f"\n\n[#5b6680][b]o[/b] open on warframe.market · [b]space[/b] select · [b]l[/b] list it[/]"))
 
     # ---- events -----------------------------------------------------------
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
@@ -345,6 +460,27 @@ class PlatScout(App):
         box.value = ""
         box.remove_class("shown")
         self.query_one(DataTable).focus()
+
+    def action_toggle_select(self):
+        table = self.query_one(DataTable)
+        if self.rows and 0 <= table.cursor_row < len(self.rows):
+            c = self.rows[table.cursor_row]
+            self.selected ^= {(c["name"], c["action"])}
+            row = table.cursor_row
+            self.refresh_view()
+            table.move_cursor(row=min(row + 1, len(self.rows) - 1))
+
+    def action_list_selected(self):
+        table = self.query_one(DataTable)
+        rows = [c for c in self.rows if (c["name"], c["action"]) in self.selected]
+        if not rows and self.rows and 0 <= table.cursor_row < len(self.rows):
+            rows = [self.rows[table.cursor_row]]
+        if rows:
+            self.push_screen(ReviewScreen(rows), lambda _: self.reset_selection())
+
+    def reset_selection(self):
+        self.selected.clear()
+        self.refresh_view()
 
     def action_open(self):
         table = self.query_one(DataTable)

@@ -36,7 +36,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse rankings: `m`/`a`/`i`/`p`/`r` mods/arcanes/items/sets/relics, `1`-`4` ranking, `f` sell-now only, `/` search, `o` open on warframe.market, `u` update inventory, `s` scan the current tab, `S` scan all tabs, `x` stop |
+| `plat-scout tui` | browse rankings: `m`/`a`/`i`/`p`/`r` mods/arcanes/items/sets/relics, `1`-`4` ranking, `f` sell-now only, `/` search, `o` open on warframe.market, `u` update inventory, `s` scan the current tab, `S` scan all tabs, `x` stop, `space`/`l` select & list on warframe.market |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
@@ -45,6 +45,22 @@ in Python). If you get "permission denied", run it with `sudo` once.
 
 The ranking files are rewritten after every item during `prices`, so you can
 open them while the scan runs.
+
+## Listing on warframe.market
+
+In the TUI: `space` marks rows, `l` opens a review of exactly what would be
+posted (item, rank, quantity, price, new listing or price update of one you
+already have). `p` switches pricing between matching the lowest online seller,
+undercutting it by 1p, or the online average. `y` posts, `esc` cancels.
+Nothing is posted without that review.
+
+Only rows you can sell as-is are listed (not "rank to…", "refine…", "buy…").
+
+First time it asks for your warframe.market session token: log in on
+warframe.market in your browser, F12 → Application/Storage → Cookies →
+`https://warframe.market` → copy the `JWT` cookie value. It's saved in
+`data/wfm-token` (git-ignored, readable only by you). Your account must be
+verified on warframe.market to create orders.
 
 ## Output (in `data/`)
 

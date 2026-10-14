@@ -67,7 +67,7 @@ verified on warframe.market to create orders.
 | File | Ranked by |
 |---|---|
 | `sell-candidates.json` | lowest online price × trades per day |
-| `sell-candidates-owned.json` | lowest price × your copies, capped at what sells in 7 days |
+| `sell-candidates-owned.json` | lowest price × your copies, capped at what sells in 7 days (bulk items: also what online buyers want right now) |
 | `sell-candidates-volume.json` | your copies × trades per day (price ignored) |
 | `mod-prices.json` / `.csv` | every tradable mod: lowest/average price and trades/day at rank 0 and max rank |
 

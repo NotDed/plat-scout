@@ -157,6 +157,7 @@ def candidates_all(results):
                         "averagePrice": p["average"], "tradesPerDay": p["tradesPerDay"],
                         "onlineSellers": p["sellers"], "yourCopies": copies,
                         "bestBuy": p.get("bestBuy"), "ducats": r.get("ducats", 0),
+                        "bulk": r.get("bulk", False), "buyDemand": p.get("buyDemand", 0),
                         "score": round(p["lowest"] * p["tradesPerDay"], 1),
                         "url": f"https://warframe.market/items/{r['slug']}",
                         **({"refinements": refs} if refs else {})})
@@ -164,15 +165,23 @@ def candidates_all(results):
     return out
 
 
+def sellable_copies(trades_per_day, buy_demand=0, bulk=False):
+    """How many copies the market should absorb in WEEK days."""
+    by_history = trades_per_day * WEEK
+    return max(by_history, buy_demand) if bulk else by_history
+
+
 def owned_candidates(results):
     """Same options, ranked by plat you could make from YOUR copies in a week.
 
     Copies count only up to what the market trades in WEEK days, so 29 copies
-    of a mod that sells once a day count as 7, not 29.
+    of a mod that sells once a day count as 7, not 29. Bulk-tradable items
+    (one buyer can take many) also count what online buyers want right now.
     """
     out = []
     for c in candidates_all(results):
-        sellable = min(c["yourCopies"], c["tradesPerDay"] * WEEK)
+        sellable = min(c["yourCopies"], sellable_copies(c["tradesPerDay"], c.get("buyDemand", 0),
+                                                        c.get("bulk", False)))
         out.append({**c, "sellableIn7Days": round(sellable, 1),
                     "potentialPlat": round(c["lowestPrice"] * sellable)})
     out.sort(key=lambda c: -c["potentialPlat"])
@@ -284,6 +293,8 @@ def run(mods_path, all_sellers=False, from_prices=False):
                 and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
         def plat(kind, rank):
             return [x["platinum"] for x in live if x["type"] == kind and x.get("rank", 0) == rank]
+        def demand(rank):  # copies online buyers want right now
+            return sum(x.get("quantity", 1) for x in live if x["type"] == "buy" and x.get("rank", 0) == rank)
         r0, rmax = (plat("sell", 0), plat("buy", 0)), (plat("sell", max_rank), plat("buy", max_rank))
         days = closed_days(item["slug"])
         volume = trades_per_day(days, {0, max_rank}, o["subtype"])
@@ -298,6 +309,8 @@ def run(mods_path, all_sellers=False, from_prices=False):
                     continue
                 st = stats([x["platinum"] for x in online if x["type"] == "sell" and x.get("subtype") == sub],
                            [x["platinum"] for x in online if x["type"] == "buy" and x.get("subtype") == sub])
+                st["buyDemand"] = sum(x.get("quantity", 1) for x in online
+                                      if x["type"] == "buy" and x.get("subtype") == sub)
                 st["soldAvg"] = sold_price(days, sub)
                 if st["lowest"] is None and st["soldAvg"]:
                     # nobody online selling this level: fall back to what it sold for
@@ -310,9 +323,11 @@ def run(mods_path, all_sellers=False, from_prices=False):
                         "ownedMax": o["ranks"].get(max_rank, 0) if max_rank else 0,
                         "maxRank": max_rank,
                         "isArcane": "arcane_enhancement" in item.get("tags", []),
+                        "bulk": bool(item.get("bulkTradable")),
                         "ducats": item.get("ducats", 0),
-                        "rank0": {**stats(*r0), "tradesPerDay": volume[0]},
-                        "maxRankPrice": {**stats(*rmax), "tradesPerDay": volume[max_rank]},
+                        "rank0": {**stats(*r0), "tradesPerDay": volume[0], "buyDemand": demand(0)},
+                        "maxRankPrice": {**stats(*rmax), "tradesPerDay": volume[max_rank],
+                                         "buyDemand": demand(max_rank)},
                         **({"subtype": o["subtype"], "refinements": refinements}
                            if refinements else {})})
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)

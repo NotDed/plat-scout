@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 import extract
-from prices import (DELAY, REFINE_TRACES, closed_days, get, progress, sold_price, stats,
-                    trades_per_day, write_json)
+from prices import (DELAY, REFINE_TRACES, closed_days, get, progress, sellable_copies,
+                    sold_price, stats, trades_per_day, write_json)
 
 DATA = Path(__file__).resolve().parent / "data"
 SUFFIX = {"intact": "Bronze", "exceptional": "Silver", "flawless": "Gold", "radiant": "Platinum"}
@@ -183,9 +183,16 @@ def relics():
             if REFINE_TRACES[sub] > REFINE_TRACES[cur] and ev[sub] - base_best >= REFINE_MIN_GAIN:
                 options.append((ev[sub], f"refine to {sub} ({REFINE_TRACES[sub] - REFINE_TRACES[cur]}"
                                          f" traces) & crack (expected {ev[sub]}p)"))
-        best, action = max((o for o in options if o[1]), key=lambda o: o[0])
+        # selling is limited by demand (relics are bulk: count buyers' quantities too);
+        # cracking isn't, you can open every copy yourself
+        can_sell = min(e["count"], sellable_copies(own_sell.get("tradesPerDay", 0),
+                                                   own_sell.get("buyDemand", 0), bulk=True))
+        totals = [(v * (can_sell if a and a.startswith("sell") else e["count"]), v, a)
+                  for v, a in options if a]
+        total, best, action = max(totals)
         top.sort(key=lambda d: -(d["chance"] / 100 * (d["price"] or 0)))
-        rows.append({"name": e["name"], "action": action, "score": round(best * e["count"]),
+        rows.append({"name": e["name"], "action": action, "score": round(total),
+                     "sellableIn7Days": round(can_sell, 1), "buyDemand": own_sell.get("buyDemand", 0),
                      "lowestPrice": sell_price, "averagePrice": ev[cur],
                      "bestBuy": own_sell.get("bestBuy"),
                      "tradesPerDay": own_sell.get("tradesPerDay", 0),

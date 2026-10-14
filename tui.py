@@ -440,6 +440,10 @@ class PlatScout(App):
                     low = "~" + low  # no one online: price from past sales
                 avg = f"{p['average']}p" if p["average"] else "-"
                 extra += f"\n[#8a93a6]{sub:<12}[/] {low:>6} {avg:>6} {p['tradesPerDay']:>6}"
+        if c.get("buyDemand"):
+            extra += f"\n[#8a93a6]buyers want now[/]     [#c39bff]{c['buyDemand']}[/]"
+        if "sellableIn7Days" in c and "potentialPlat" not in c:
+            extra += f"\n[#8a93a6]sellable in 7 days[/]  {c['sellableIn7Days']}"
         if c.get("ducats"):
             extra += f"\n[#8a93a6]ducats (Baro)[/]       [#e3c75b]{c['ducats']}[/]"
         if c.get("parts"):  # sets

@@ -17,7 +17,7 @@ This adds a `plat-scout` command. Data stays in this repo's `data/` folder.
 ## Usage
 
 ```
-plat-scout tui                 # interactive browser (live-reloads during a scan)
+plat-scout tui                 # interactive browser: u = update inventory, s = scan prices
 plat-scout run                 # fetch + extract + prices, everything (~18 min)
 plat-scout top                 # best 15 mods to sell, by plat from your copies
 plat-scout top --quick         # only ones you can sell right now (no ranking up)
@@ -32,7 +32,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json` and `arcanes.json` |
 | `plat-scout prices [mods\|arcanes]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse rankings: `m`/`a` mods/arcanes, `1`-`3` ranking, `f` sell-now only, `/` search, `o` open on warframe.market |
+| `plat-scout tui` | browse rankings: `m`/`a` mods/arcanes, `1`-`3` ranking, `f` sell-now only, `/` search, `o` open on warframe.market, `u` update inventory, `s` scan the current tab, `x` stop |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as

@@ -1,6 +1,9 @@
 """plat-scout TUI: browse the sell rankings, live-reloading while a scan runs."""
 
+import asyncio
 import json
+import re
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -8,9 +11,13 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Input, Static
+from textual import work
+from textual.widgets import DataTable, Footer, Input, ProgressBar, Static
 
-DATA = Path(__file__).resolve().parent / "data"
+REPO = Path(__file__).resolve().parent
+DATA = REPO / "data"
+# matches the progress line prices.py redraws: "[###---] 120/433  27%  ~9m12s left  Serration"
+PROGRESS = re.compile(r"(\d+)/(\d+)\s+\d+%\s+~(\S+) left\s+(.*)")
 KINDS = {"mods": "", "arcanes": "arcane-"}
 RANKINGS = {  # key -> (file, score field, label)
     "owned": ("sell-candidates-owned.json", "potentialPlat", "plat from your copies (7 days)"),
@@ -88,6 +95,13 @@ class PlatScout(App):
     DataTable > .datatable--cursor { background: #1f6f4a; color: #ffffff; }
     #side { width: 44; }
     #detail { height: 1fr; border: round #2a3550; padding: 1 2; }
+    #scan { display: none; height: 3; margin: 0 2; padding: 0 1; border: round #3ddc84; }
+    #scan.running { display: block; }
+    #scan Horizontal { height: 1; }
+    #scan ProgressBar { width: 52; }
+    #scan Bar > .bar--bar { color: #3ddc84; }
+    #scan Bar > .bar--indeterminate { color: #3ddc84; }
+    #scan-label { width: 1fr; padding: 0 0 0 2; }
     """
     BINDINGS = [
         Binding("m", "kind('mods')", "Mods"),
@@ -98,6 +112,9 @@ class PlatScout(App):
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
+        Binding("s", "scan", "Scan prices"),
+        Binding("u", "update_inventory", "Update inventory"),
+        Binding("x", "stop_scan", "Stop scan", show=False),
         Binding("escape", "clear_search", "Clear", show=False),
         Binding("q", "quit", "Quit"),
     ]
@@ -106,11 +123,16 @@ class PlatScout(App):
         super().__init__()
         self.kind, self.ranking, self.quick, self.search_text = "mods", "owned", False, ""
         self.rows, self.meta, self.mtime = [], {}, None
+        self.proc = None  # running scan / fetch subprocess
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
             yield Static(build_logo(), id="art")
             yield Static(id="headline")
+        with Vertical(id="scan"):
+            with Horizontal():
+                yield ProgressBar(id="scan-bar", show_eta=False)
+                yield Static(id="scan-label")
         yield Input(placeholder="filter by name…  (esc to clear)", id="search")
         with Horizontal(id="body"):
             yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
@@ -181,7 +203,7 @@ class PlatScout(App):
         label = RANKINGS[self.ranking][2]
         tab = lambda k, name: f"[reverse b #9fd8ff] {name} [/]" if k == self.kind else f" [#5b6680]{name}[/] "
         if not self.meta:
-            status = f"[#ff6b6b]no data yet[/] — run [b]plat-scout prices {self.kind}[/]"
+            status = f"[#ff6b6b]no data yet[/] — press [b]s[/] to scan {self.kind}"
         else:
             status = f"[#5b6680]{self.meta.get('progress', '')} · updated {self.meta.get('updated', '')}[/]"
         total = sum(c.get("potentialPlat", 0) for c in self.rows) if self.ranking == "owned" else None
@@ -256,6 +278,79 @@ class PlatScout(App):
         table = self.query_one(DataTable)
         if self.rows and 0 <= table.cursor_row < len(self.rows):
             webbrowser.open(self.rows[table.cursor_row]["url"])
+
+
+    # ---- scanning ---------------------------------------------------------
+    def action_scan(self):
+        source = DATA / f"{self.kind}.json"
+        if not source.exists():
+            self.notify(f"{source.name} not found. Press u to update your inventory first.",
+                        severity="error")
+            return
+        self.run_steps([(f"scanning {self.kind}", ["prices.py", str(source)])])
+
+    def action_update_inventory(self):
+        self.run_steps([("reading game & downloading inventory", ["cli.py", "fetch"]),
+                        ("splitting into mods and arcanes", ["cli.py", "extract"])])
+
+    def action_stop_scan(self):
+        if self.proc and self.proc.returncode is None:
+            self.proc.terminate()
+            self.notify("scan stopped. Rankings keep what was checked so far.")
+
+    def run_steps(self, steps):
+        if self.proc and self.proc.returncode is None:
+            self.notify("already running, press x to stop it first", severity="warning")
+            return
+        self.steps_worker(steps)
+
+    @work(exclusive=True)
+    async def steps_worker(self, steps):
+        box, bar = self.query_one("#scan"), self.query_one("#scan-bar", ProgressBar)
+        label = self.query_one("#scan-label", Static)
+        box.add_class("running")
+        try:
+            for title, cmd in steps:
+                bar.update(total=None, progress=0)  # indeterminate until we see a count
+                label.update(markup(f"[b #3ddc84]{title}[/] [#5b6680]starting…[/]"))
+                ok, last = await self.run_one(cmd, title, bar, label)
+                if not ok:
+                    self.notify(last or f"{title} failed", severity="error", timeout=10)
+                    return
+            self.notify(f"done: {steps[-1][0]}")
+        finally:
+            box.remove_class("running")
+            self.proc = None
+            self.load()
+
+    async def run_one(self, cmd, title, bar, label):
+        self.proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-u", *cmd, cwd=REPO,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        last, buf = "", b""
+        while chunk := await self.proc.stdout.read(512):
+            buf += chunk
+            *parts, buf = re.split(rb"[\r\n]", buf)
+            for part in parts:
+                line = part.decode(errors="replace").strip()
+                if not line:
+                    continue
+                m = PROGRESS.search(line)
+                if m:
+                    done, total, left, name = int(m[1]), int(m[2]), m[3], m[4].strip()
+                    bar.update(total=total, progress=done)
+                    label.update(markup(f"[b #3ddc84]{title}[/]  {done}/{total}  "
+                                        f"[#e3c75b]~{left} left[/]  [#8a93a6]{name}[/]"
+                                        f"   [#5b6680]x to stop[/]"))
+                else:
+                    last = line
+                    label.update(markup(f"[b #3ddc84]{title}[/]  [#8a93a6]{line}[/]"))
+        await self.proc.wait()
+        return self.proc.returncode == 0, last
+
+    def on_unmount(self):
+        if self.proc and self.proc.returncode is None:
+            self.proc.terminate()
 
 
 def run():

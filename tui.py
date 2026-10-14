@@ -139,6 +139,8 @@ class ReviewScreen(ModalScreen):
         token_box.display = not self.user
         if not self.user:
             token_box.focus()
+        else:
+            self.set_focus(None)  # so y / p / esc reach this screen, not a text box
         who = (f"[b #3ddc84]{self.user.get('ingameName', '?')}[/]" if self.user
                else "[#ff6b6b]not logged in[/] [#8a93a6]- paste your token below[/]")
         lines = [f"[b #e8eefc]Post to warframe.market[/]   as {who}",
@@ -166,7 +168,11 @@ class ReviewScreen(ModalScreen):
                   if self.user and ready else "[b]esc[/] close"]
         self.query_one("#review-body", Static).update(markup("\n".join(lines)))
 
+    def on_input_changed(self, event: Input.Changed):
+        event.stop()  # the token must never reach the main screen's search
+
     def on_input_submitted(self, event: Input.Submitted):
+        event.stop()
         listing.save_token(event.value)
         event.input.value = ""
         self.refresh_plan()
@@ -464,11 +470,14 @@ class PlatScout(App):
                 self.draw_detail(self.rows[i])
 
     def on_input_changed(self, event: Input.Changed):
+        if event.input.id != "search":
+            return
         self.search_text = event.value
         self.refresh_view()
 
     def on_input_submitted(self, event: Input.Submitted):
-        self.query_one(DataTable).focus()
+        if event.input.id == "search":
+            self.query_one(DataTable).focus()
 
     # ---- actions ----------------------------------------------------------
     def action_kind(self, kind):

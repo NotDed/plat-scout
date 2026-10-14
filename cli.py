@@ -13,14 +13,15 @@ import prices
 
 DATA = Path(__file__).resolve().parent / "data"
 KINDS = {"mods": ("mods.json", ""), "arcanes": ("arcanes.json", "arcane-"),
-         "items": ("items.json", "item-")}
+         "items": ("items.json", "item-"), "relics": ("relics.json", "relic-")}
 RANKINGS = {  # --by value -> (file suffix, field shown as "score")
     "market": ("sell-candidates.json", "score"),
     "owned": ("sell-candidates-owned.json", "potentialPlat"),
     "volume": ("sell-candidates-volume.json", "volumeScore"),
     "ducats": ("ducat-candidates.json", "score"),
+    "crack": ("candidates.json", "score"),  # relics only: sell vs crack vs refine
 }
-SPECIAL = {"sets": "set-candidates.json", "relics": "relic-candidates.json"}
+SPECIAL = {"sets": "set-candidates.json"}
 
 
 def kinds(which):
@@ -60,7 +61,7 @@ def cmd_sets(a):
 
 
 def cmd_relics(a):
-    need(DATA / "items.json", "extract")
+    need(DATA / "relics.json", "extract")
     extras.relics()
 
 
@@ -126,7 +127,7 @@ def main():
     s = sub.add_parser("sets", help="prime sets you own parts of: complete them or not?")
     s.set_defaults(func=cmd_sets)
 
-    s = sub.add_parser("relics", help="relic crack value vs selling (needs prices items first)")
+    s = sub.add_parser("relics", help="relic crack value vs selling (needs prices relics first)")
     s.set_defaults(func=cmd_relics)
 
     s = sub.add_parser("rank", help="rebuild the rankings from saved prices (no API calls)")
@@ -137,7 +138,8 @@ def main():
     s.add_argument("kind", nargs="?", default="mods", choices=[*KINDS, *SPECIAL])
     s.add_argument("--by", choices=list(RANKINGS), default="owned",
                    help="market = price x trades/day, owned = plat from your copies (default), "
-                        "volume = copies x trades/day, ducats = parts worth more at Baro")
+                        "volume = copies x trades/day, ducats = parts worth more at Baro, "
+                        "crack = relics: sell vs crack vs refine")
     s.add_argument("-n", type=int, default=15, help="how many rows (default 15)")
     s.add_argument("--quick", action="store_true", help="hide options that need ranking up or fusing")
     s.set_defaults(func=cmd_top)

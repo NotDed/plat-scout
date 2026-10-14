@@ -21,7 +21,7 @@ This adds a `plat-scout` command. Data stays in this repo's `data/` folder.
 ```
 plat-scout tui                 # interactive browser: u = update inventory, s = scan tab, S = scan all
 plat-scout sets                # prime sets you own parts of: complete them or not?
-plat-scout relics              # crack value of each relic vs selling it
+plat-scout relics              # crack value of each relic vs selling it (after prices relics)
 plat-scout run                 # fetch + extract + prices, everything (~18 min)
 plat-scout top                 # best 15 mods to sell, by plat from your copies
 plat-scout top --quick         # only ones you can sell right now (no ranking up)
@@ -33,10 +33,10 @@ Step by step:
 | Command | What it does |
 |---|---|
 | `plat-scout fetch` | download your inventory (game running and logged in) |
-| `plat-scout extract` | split it into `mods.json`, `arcanes.json` and `items.json` |
-| `plat-scout prices [mods\|arcanes\|items]` | scan warframe.market (~2.3 s per item) |
+| `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
+| `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`5` tabs (mods, arcanes, items, sets, relics), `v` ranking, `c`/`C` sort column / reverse (or click a header), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`5` tabs (mods, arcanes, items, sets, relics), `v` ranking (relics also have "sell or crack"), `c`/`C` sort column / reverse (or click a header), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
@@ -71,7 +71,8 @@ verified on warframe.market to create orders.
 | `sell-candidates-volume.json` | your copies × trades per day (price ignored) |
 | `mod-prices.json` / `.csv` | every tradable mod: lowest/average price and trades/day at rank 0 and max rank |
 
-Arcanes and items produce the same files with an `arcane-` / `item-` prefix,
+Arcanes, items and relics produce the same files with an `arcane-` / `item-` /
+`relic-` prefix,
 plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 
 | File | What |

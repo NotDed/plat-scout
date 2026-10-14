@@ -166,13 +166,14 @@ def candidates_all(results):
 
 
 SERIOUS_BUY = 0.5  # buy orders below half the lowest sell price are lowballs, not demand
+MAX_BUY_QTY = 30   # "buy 9999" orders are standing bulk offers; count at most this per order
 
 
 def buyer_demand(buy_orders, lowest_sell):
     """Copies online buyers want at a price close to what sellers ask."""
     if lowest_sell is None:
         return 0
-    return sum(x.get("quantity", 1) for x in buy_orders
+    return sum(min(x.get("quantity", 1), MAX_BUY_QTY) for x in buy_orders
                if x["platinum"] >= lowest_sell * SERIOUS_BUY)
 
 

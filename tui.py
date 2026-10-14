@@ -22,18 +22,20 @@ REPO = Path(__file__).resolve().parent
 DATA = REPO / "data"
 # matches the progress line prices.py redraws: "[###---] 120/433  27%  ~9m12s left  Serration"
 PROGRESS = re.compile(r"(\d+)/(\d+)\s+\d+%\s+~(\S+) left\s+(.*)")
-KINDS = {"mods": "", "arcanes": "arcane-", "items": "item-"}  # tab -> file prefix
+KINDS = {"mods": "", "arcanes": "arcane-", "items": "item-", "relics": "relic-"}  # tab -> file prefix
 RANKINGS = {  # key -> (file, score field, label)
     "owned": ("sell-candidates-owned.json", "potentialPlat", "plat from your copies (7 days)"),
     "market": ("sell-candidates.json", "score", "price × trades per day"),
     "volume": ("sell-candidates-volume.json", "volumeScore", "your copies × trades per day"),
     "ducats": ("ducat-candidates.json", "score", "ducats at Baro (worth ≥10 ducats per plat)"),
+    "crack": ("candidates.json", "score", "best of sell / crack / refine, × copies"),
 }
 # tabs with a single ranking of their own, made by extras.py
-SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
-           "relics": ("relic-candidates.json", "best of sell / crack / refine, × copies")}
+SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set")}
 TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics")]
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
+RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
+                    ("volume", "volume")]
 SORT_NONE = 0  # column index 0 ("#") = the ranking's own order
 COLUMNS = {  # header row per tab; the 6th column's field differs
     "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
@@ -332,7 +334,7 @@ class PlatScout(App):
         self.rank_of = {id(c): n for n, c in enumerate(ranked, 1)}
         self.rows = self.sorted_rows(ranked)
         table = self.query_one(DataTable)
-        layout = self.kind if self.kind in COLUMNS else "default"
+        layout = self.layout()
         if self.columns_for != layout:
             table.clear(columns=True)
             table.add_columns(*COLUMNS[layout])
@@ -385,7 +387,7 @@ class PlatScout(App):
         return present + missing  # rows without a value always go last
 
     def sort_label(self):
-        layout = self.kind if self.kind in COLUMNS else "default"
+        layout = self.layout()
         if self.sort_col == SORT_NONE:
             return "ranking order" + ("" if self.sort_desc else " (reversed)")
         name = COLUMNS[layout][self.sort_col]
@@ -398,7 +400,7 @@ class PlatScout(App):
                          else f"[#e3c75b]{key}[/] [#5b6680]{kind.upper()}[/]" for key, kind in TABS)
         ranks = "[#e3c75b]v[/] " + "  ".join(
             f"[b #e3c75b]{name}[/]" if key == self.ranking else f"[#5b6680]{name}[/]"
-            for key, name in RANK_ORDER)
+            for key, name in self.rank_order())
         if not self.meta:
             status = f"[#ff6b6b]no data yet[/] — press [b]s[/] to scan {self.kind}"
         else:
@@ -408,7 +410,7 @@ class PlatScout(App):
                  + f"   [#e3c75b]c[/] [#5b6680]sort:[/] [b #9fd8ff]{self.sort_label()}[/]"
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
-        if self.kind == "relics":
+        if self.kind == "relics" and self.ranking == "crack":
             total = sum(c["score"] for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")
         elif self.kind == "sets":
@@ -497,15 +499,27 @@ class PlatScout(App):
             self.query_one(DataTable).focus()
 
     # ---- actions ----------------------------------------------------------
+    def rank_order(self):
+        return RELIC_RANK_ORDER if self.kind == "relics" else RANK_ORDER
+
+    def layout(self):
+        """Which header row the table uses."""
+        if self.kind == "sets":
+            return "sets"
+        return "relics" if self.kind == "relics" and self.ranking == "crack" else "default"
+
     def action_kind(self, kind):
         self.kind = kind
+        keys = [k for k, _ in self.rank_order()]
+        if self.ranking not in keys:  # e.g. ducats doesn't exist for relics
+            self.ranking = keys[0]
         self.load()
 
     def action_next_ranking(self):
         if self.kind in SPECIAL:
             self.notify("this tab has a single ranking")
             return
-        keys = [k for k, _ in RANK_ORDER]
+        keys = [k for k, _ in self.rank_order()]
         self.action_rank(keys[(keys.index(self.ranking) + 1) % len(keys)])
 
     def action_next_sort(self):
@@ -573,22 +587,27 @@ class PlatScout(App):
 
 
     # ---- scanning ---------------------------------------------------------
-    def scan_step(self, kind):
-        if kind in SPECIAL:
-            return (f"checking {kind}", ["extras.py", kind])
-        return (f"scanning {kind}", ["prices.py", str(DATA / f"{kind}.json")])
+    def scan_steps(self, kind):
+        if kind == "sets":
+            return [("checking sets", ["extras.py", "sets"])]
+        steps = [(f"scanning {kind}", ["prices.py", str(DATA / f"{kind}.json")])]
+        if kind == "relics":  # crack values need the relic prices just scanned
+            steps.append(("working out crack values", ["extras.py", "relics"]))
+        return steps
+
+    @staticmethod
+    def source(kind):
+        return DATA / ("items.json" if kind == "sets" else f"{kind}.json")
 
     def action_scan(self):
-        source = DATA / ("items.json" if self.kind in SPECIAL else f"{self.kind}.json")
-        if not source.exists():
-            self.notify(f"{source.name} not found. Press u to update your inventory first.",
-                        severity="error")
+        if not self.source(self.kind).exists():
+            self.notify(f"{self.source(self.kind).name} not found. Press u to update your "
+                        "inventory first.", severity="error")
             return
-        self.run_steps([self.scan_step(self.kind)])
+        self.run_steps(self.scan_steps(self.kind))
 
     def action_scan_all(self):
-        steps = [self.scan_step(k) for _, k in TABS
-                 if (DATA / ("items.json" if k in SPECIAL else f"{k}.json")).exists()]
+        steps = [step for _, k in TABS if self.source(k).exists() for step in self.scan_steps(k)]
         if not steps:
             self.notify("nothing to scan. Press u to update your inventory first.", severity="error")
             return

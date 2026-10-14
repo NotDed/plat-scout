@@ -5,8 +5,8 @@ Usage:
   python3 extras.py sets     # -> data/set-candidates.json
   python3 extras.py relics   # -> data/relic-candidates.json
 
-Both read data/items.json (from extract.py). relics also reads
-data/item-prices.json, when present, for each relic's own sell price.
+sets reads data/items.json, relics reads data/relics.json (from extract.py)
+and data/relic-prices.json, when present, for each relic's own sell price.
 Prices are the lowest online sell order; "Buy" is the best online buy order.
 """
 
@@ -137,10 +137,10 @@ def relic_drops():
 def relics():
     market = extract.load_market()
     drops = relic_drops()
-    relics = [e for e in json.load(open(DATA / "items.json")) if e.get("subtype") in SUFFIX]
+    relics = [e for e in json.load(open(DATA / "relics.json")) if e.get("subtype") in SUFFIX]
     sell = {}
     try:
-        for r in json.load(open(DATA / "item-prices.json")):
+        for r in json.load(open(DATA / "relic-prices.json")):
             for sub, p in (r.get("refinements") or {}).items():
                 sell[(r["slug"], sub)] = p
     except OSError:

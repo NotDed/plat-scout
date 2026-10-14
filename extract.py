@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Turn data/inventory.json into data/mods.json, data/arcanes.json and
-data/items.json (every other tradable thing: prime parts, blueprints, relics...).
+"""Turn data/inventory.json into data/mods.json, data/arcanes.json,
+data/relics.json and data/items.json (every other tradable thing: prime parts,
+blueprints, Ayatan stars, fish...).
 
 Mod and arcane names come from the community WFCD warframe-items database;
 everything else is matched against warframe.market's item list. Both are
@@ -111,8 +112,10 @@ def main():
         else:
             unknown.add(t)
 
-    items = tradable_items(inv, load_market())
-    for name, items in (("mods", mods), ("arcanes", arcanes), ("items", items)):
+    tradable = tradable_items(inv, load_market())
+    relics = [e for e in tradable if e.get("subtype")]  # relics carry a refinement
+    items = [e for e in tradable if not e.get("subtype")]
+    for name, items in (("mods", mods), ("arcanes", arcanes), ("items", items), ("relics", relics)):
         items.sort(key=lambda e: (e["name"], -e["rank"]))
         (DATA / f"{name}.json").write_text(json.dumps(items, indent=2, ensure_ascii=False))
         print(f"{name}.json: {len(items)} entries, {sum(e['count'] for e in items)} copies")

@@ -32,7 +32,9 @@ RANKINGS = {  # key -> (file, score field, label)
 # tabs with a single ranking of their own, made by extras.py
 SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
            "relics": ("relic-candidates.json", "best of sell / crack / refine, × copies")}
-TABS = [("m", "mods"), ("a", "arcanes"), ("i", "items"), ("p", "sets"), ("r", "relics")]
+TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics")]
+RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
+SORT_NONE = 0  # column index 0 ("#") = the ranking's own order
 COLUMNS = {  # header row per tab; the 6th column's field differs
     "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
     "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
@@ -226,10 +228,9 @@ class PlatScout(App):
     """
     BINDINGS = [
         *[Binding(key, f"kind('{kind}')", kind.title(), show=False) for key, kind in TABS],
-        Binding("1", "rank('owned')", "Your plat", show=False),
-        Binding("2", "rank('market')", "Market", show=False),
-        Binding("3", "rank('volume')", "Volume", show=False),
-        Binding("4", "rank('ducats')", "Ducats", show=False),
+        Binding("v", "next_ranking", "Ranking"),
+        Binding("c", "next_sort", "Sort"),
+        Binding("C", "flip_sort", "Reverse sort", show=False),
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
@@ -249,6 +250,7 @@ class PlatScout(App):
         self.rows, self.meta, self.mtime = [], {}, None
         self.proc = None  # running scan / fetch subprocess
         self.selected = set()  # (name, action) of rows marked with space
+        self.sort_col, self.sort_desc = SORT_NONE, True
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -307,7 +309,9 @@ class PlatScout(App):
     # ---- drawing ----------------------------------------------------------
     def refresh_view(self):
         field = self.field()
-        self.rows = self.visible()
+        ranked = self.visible()
+        self.rank_of = {id(c): n for n, c in enumerate(ranked, 1)}
+        self.rows = self.sorted_rows(ranked)
         table = self.query_one(DataTable)
         layout = self.kind if self.kind in COLUMNS else "default"
         if self.columns_for != layout:
@@ -324,7 +328,7 @@ class PlatScout(App):
             color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
             action_color = "#ff9f5a" if c["action"].startswith(NEEDS_WORK) else "#3ddc84"
             table.add_row(
-                Text("●" if (c["name"], c["action"]) in self.selected else str(i),
+                Text("●" if (c["name"], c["action"]) in self.selected else str(self.rank_of[id(c)]),
                      style="bold #3ddc84" if (c["name"], c["action"]) in self.selected
                      else "#5b6680"),
                 Text(c["name"], style="bold #e8eefc"),
@@ -339,21 +343,50 @@ class PlatScout(App):
         self.draw_headline()
         self.draw_detail(self.rows[0] if self.rows else None)
 
+    def sort_value(self, c, col):
+        """Value of row c in table column col, for sorting."""
+        sixth = "missingCost" if self.kind == "sets" else "averagePrice"
+        field = [None, "name", self.field(), "lowestPrice", "bestBuy", sixth,
+                 "tradesPerDay", "yourCopies", "action"][col]
+        v = c.get(field)
+        if isinstance(v, str) and "/" in v and field == "yourCopies":  # sets: "2/4"
+            have, need = v.split("/")
+            v = int(have) / int(need)
+        return v
+
+    def sorted_rows(self, rows):
+        if self.sort_col == SORT_NONE:
+            return rows if self.sort_desc else rows[::-1]
+        present = [c for c in rows if self.sort_value(c, self.sort_col) is not None]
+        missing = [c for c in rows if self.sort_value(c, self.sort_col) is None]
+        present.sort(key=lambda c: (self.sort_value(c, self.sort_col).lower()
+                                    if isinstance(self.sort_value(c, self.sort_col), str)
+                                    else self.sort_value(c, self.sort_col)),
+                     reverse=self.sort_desc)
+        return present + missing  # rows without a value always go last
+
+    def sort_label(self):
+        layout = self.kind if self.kind in COLUMNS else "default"
+        if self.sort_col == SORT_NONE:
+            return "ranking order" + ("" if self.sort_desc else " (reversed)")
+        name = COLUMNS[layout][self.sort_col]
+        return f"{name} {'↓' if self.sort_desc else '↑'}"
+
     def draw_headline(self):
         special = self.kind in SPECIAL
         label = SPECIAL[self.kind][1] if special else RANKINGS[self.ranking][2]
         tabs = "  ".join(f"[reverse b #9fd8ff] {key} {kind.upper()} [/]" if kind == self.kind
                          else f"[#e3c75b]{key}[/] [#5b6680]{kind.upper()}[/]" for key, kind in TABS)
-        ranks = "  ".join(f"[b #e3c75b]{n} {name}[/]" if key == self.ranking and not special
-                          else f"[#5b6680]{n} {name}[/]"
-                          for n, (key, name) in enumerate([("owned", "your plat"), ("market", "market"),
-                                                           ("volume", "volume"), ("ducats", "ducats")], 1))
+        ranks = "[#e3c75b]v[/] " + "  ".join(
+            f"[b #e3c75b]{name}[/]" if key == self.ranking else f"[#5b6680]{name}[/]"
+            for key, name in RANK_ORDER)
         if not self.meta:
             status = f"[#ff6b6b]no data yet[/] — press [b]s[/] to scan {self.kind}"
         else:
             status = f"[#5b6680]{self.meta.get('progress', '')} · updated {self.meta.get('updated', '')}[/]"
         lines = [TITLE, "", tabs,
                  (f"[#5b6680]ranked by[/] [b #e3c75b]{label}[/]" if special else ranks)
+                 + f"   [#e3c75b]c[/] [#5b6680]sort:[/] [b #9fd8ff]{self.sort_label()}[/]"
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
         if self.kind == "relics":
@@ -441,6 +474,31 @@ class PlatScout(App):
     def action_kind(self, kind):
         self.kind = kind
         self.load()
+
+    def action_next_ranking(self):
+        if self.kind in SPECIAL:
+            self.notify("this tab has a single ranking")
+            return
+        keys = [k for k, _ in RANK_ORDER]
+        self.action_rank(keys[(keys.index(self.ranking) + 1) % len(keys)])
+
+    def action_next_sort(self):
+        self.sort_col = (self.sort_col + 1) % 9
+        self.sort_desc = self.sort_col not in (1, 8)  # text columns start A→Z
+        self.refresh_view()
+
+    def action_flip_sort(self):
+        self.sort_desc = not self.sort_desc
+        self.refresh_view()
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected):
+        # click a header: sort by it; click again: reverse
+        if event.column_index == self.sort_col:
+            self.sort_desc = not self.sort_desc
+        else:
+            self.sort_col = event.column_index
+            self.sort_desc = self.sort_col not in (1, 8)
+        self.refresh_view()
 
     def action_rank(self, ranking):
         self.ranking = ranking

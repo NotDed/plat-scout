@@ -183,13 +183,20 @@ class ReviewScreen(ModalScreen):
         self.refresh_plan()
 
     def action_post(self):
-        if self.user and not self.busy and any("order" in p for p in self.plans):
+        if self.busy:
+            return
+        if not self.user:
+            self.notify("not logged in: paste your JWT token first", severity="error")
+        elif not any("order" in p for p in self.plans):
+            self.notify("nothing to post: every row here is skipped (see the reason on each row)",
+                        severity="warning", timeout=8)
+        else:
             self.busy = True
             self.post_all()
 
     @work(exclusive=True, thread=True)
     def post_all(self):
-        ok, failed = 0, []
+        results = []
         todo = [p for p in self.plans if "order" in p]
         body = self.query_one("#review-body", Static)
         for n, p in enumerate(todo, 1):
@@ -197,15 +204,21 @@ class ReviewScreen(ModalScreen):
                                       markup(f"[#3ddc84]posting {n}/{len(todo)}[/]  {p['name']}"))
             try:
                 listing.post(p)
-                ok += 1
-            except listing.WfmError as e:
-                failed.append(f"{p['name']}: {e}")
+                results.append((p["name"], None))
+            except Exception as e:  # show anything that goes wrong, never fail silently
+                results.append((p["name"], str(e) or type(e).__name__))
+            listing.log(p, results[-1][1])
             time.sleep(0.4)  # stay under the market's rate limit
-        msg = f"posted {ok} listing(s)" + (f", {len(failed)} failed: " + "; ".join(failed[:3])
-                                            if failed else "")
-        self.app.call_from_thread(self.app.notify, msg,
-                                  severity="error" if failed else "information", timeout=12)
-        self.app.call_from_thread(self.dismiss)
+        ok = sum(1 for _, err in results if err is None)
+        lines = [f"[b #e8eefc]Posted {ok} of {len(results)}[/]", ""]
+        for name, err in results:
+            lines.append(f"[#3ddc84]✓[/] {name}" if err is None else f"[#ff6b6b]✗ {name}: {err}[/]")
+        lines += ["", "[#8a93a6]check them at warframe.market → your profile · details in data/listing.log[/]",
+                  "[b]esc[/] close"]
+        self.app.call_from_thread(body.update, markup("\n".join(lines)))
+        self.app.call_from_thread(self.app.notify, f"posted {ok} of {len(results)} listing(s)",
+                                  severity="information" if ok == len(results) else "error",
+                                  timeout=12)
 
 
 class PlatScout(App):

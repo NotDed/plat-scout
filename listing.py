@@ -134,6 +134,14 @@ def plan(rows, pricing="match"):
     return plans
 
 
+def log(p, error=None):
+    """Append one line per post attempt to data/listing.log."""
+    with open(DATA / "listing.log", "a") as f:
+        f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "name": p["name"],
+                            "order": p.get("order"), "update": bool(p.get("existing")),
+                            "error": error}) + "\n")
+
+
 def post(p):
     """Create the order, or update the price/quantity of the one already listed."""
     if p.get("existing"):

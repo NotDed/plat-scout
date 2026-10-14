@@ -11,7 +11,8 @@ import fetch_inventory
 import prices
 
 DATA = Path(__file__).resolve().parent / "data"
-KINDS = {"mods": ("mods.json", ""), "arcanes": ("arcanes.json", "arcane-")}
+KINDS = {"mods": ("mods.json", ""), "arcanes": ("arcanes.json", "arcane-"),
+         "items": ("items.json", "item-")}
 RANKINGS = {  # --by value -> (file suffix, field shown as "score")
     "market": ("sell-candidates.json", "score"),
     "owned": ("sell-candidates-owned.json", "potentialPlat"),
@@ -91,22 +92,22 @@ def main():
     s.add_argument("--auth", help="use this '?accountId=...&nonce=...' instead of reading the game")
     s.set_defaults(func=cmd_fetch)
 
-    s = sub.add_parser("extract", help="split the inventory into mods.json and arcanes.json")
+    s = sub.add_parser("extract", help="split the inventory into mods.json, arcanes.json and items.json")
     s.set_defaults(func=cmd_extract)
 
     for name, func, text in (("prices", cmd_prices, "scan warframe.market (~15 min mods, ~3 min arcanes)"),
                              ("run", cmd_run, "fetch + extract + prices in one go")):
         s = sub.add_parser(name, help=text)
-        s.add_argument("kind", nargs="?", default="all", choices=["mods", "arcanes", "all"])
+        s.add_argument("kind", nargs="?", default="all", choices=[*KINDS, "all"])
         s.add_argument("--all-sellers", action="store_true", help="count offline sellers too")
         s.set_defaults(func=func, auth=None)
 
     s = sub.add_parser("rank", help="rebuild the rankings from saved prices (no API calls)")
-    s.add_argument("kind", nargs="?", default="all", choices=["mods", "arcanes", "all"])
+    s.add_argument("kind", nargs="?", default="all", choices=[*KINDS, "all"])
     s.set_defaults(func=cmd_rank)
 
     s = sub.add_parser("top", help="show the best sell candidates in the terminal")
-    s.add_argument("kind", nargs="?", default="mods", choices=["mods", "arcanes"])
+    s.add_argument("kind", nargs="?", default="mods", choices=list(KINDS))
     s.add_argument("--by", choices=list(RANKINGS), default="owned",
                    help="market = price x trades/day, owned = plat from your copies (default), "
                         "volume = copies x trades/day")

@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parent
 DATA = REPO / "data"
 # matches the progress line prices.py redraws: "[###---] 120/433  27%  ~9m12s left  Serration"
 PROGRESS = re.compile(r"(\d+)/(\d+)\s+\d+%\s+~(\S+) left\s+(.*)")
-KINDS = {"mods": "", "arcanes": "arcane-"}
+KINDS = {"mods": "", "arcanes": "arcane-", "items": "item-"}
 RANKINGS = {  # key -> (file, score field, label)
     "owned": ("sell-candidates-owned.json", "potentialPlat", "plat from your copies (7 days)"),
     "market": ("sell-candidates.json", "score", "price × trades per day"),
@@ -106,13 +106,15 @@ class PlatScout(App):
     BINDINGS = [
         Binding("m", "kind('mods')", "Mods"),
         Binding("a", "kind('arcanes')", "Arcanes"),
+        Binding("i", "kind('items')", "Items"),
         Binding("1", "rank('owned')", "Your plat"),
         Binding("2", "rank('market')", "Market"),
         Binding("3", "rank('volume')", "Volume"),
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
-        Binding("s", "scan", "Scan prices"),
+        Binding("s", "scan", "Scan tab"),
+        Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
         Binding("x", "stop_scan", "Stop scan", show=False),
         Binding("escape", "clear_search", "Clear", show=False),
@@ -208,7 +210,7 @@ class PlatScout(App):
             status = f"[#5b6680]{self.meta.get('progress', '')} · updated {self.meta.get('updated', '')}[/]"
         total = sum(c.get("potentialPlat", 0) for c in self.rows) if self.ranking == "owned" else None
         lines = [TITLE, "",
-                 tab("mods", "MODS") + " " + tab("arcanes", "ARCANES")
+                 tab("mods", "MODS") + " " + tab("arcanes", "ARCANES") + " " + tab("items", "ITEMS")
                  + f"   ranked by [b #e3c75b]{label}[/]"
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
@@ -289,9 +291,17 @@ class PlatScout(App):
             return
         self.run_steps([(f"scanning {self.kind}", ["prices.py", str(source)])])
 
+    def action_scan_all(self):
+        steps = [(f"scanning {k}", ["prices.py", str(DATA / f"{k}.json")])
+                 for k in KINDS if (DATA / f"{k}.json").exists()]
+        if not steps:
+            self.notify("nothing to scan. Press u to update your inventory first.", severity="error")
+            return
+        self.run_steps(steps)
+
     def action_update_inventory(self):
         self.run_steps([("reading game & downloading inventory", ["cli.py", "fetch"]),
-                        ("splitting into mods and arcanes", ["cli.py", "extract"])])
+                        ("sorting into mods, arcanes and items", ["cli.py", "extract"])])
 
     def action_stop_scan(self):
         if self.proc and self.proc.returncode is None:

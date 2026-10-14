@@ -59,12 +59,14 @@ def stats(prices):
             "sellers": len(prices)}
 
 
-def trades_per_day(slug, ranks):
+def trades_per_day(slug, ranks, subtype=None):
     """Average closed trades per day over the 90-day window, keyed by rank."""
     data = get(f"/items/{slug}/statistics", base=API_V1, key="payload")
     days = (data or {}).get("statistics_closed", {}).get("90days", [])
     out = {r: 0 for r in ranks}
     for d in days:
+        if subtype and d.get("subtype", subtype) != subtype:
+            continue
         r = d.get("mod_rank", 0)
         if r in out:
             out[r] += d["volume"]
@@ -112,7 +114,7 @@ def candidates_all(results):
         a, b = r["rank0"], r["maxRankPrice"]
         options = []
         if r["ownedRank0"]:
-            options.append(("sell as rank 0", a, r["ownedRank0"]))
+            options.append(("sell as rank 0" if r["maxRank"] else "sell", a, r["ownedRank0"]))
             if r["maxRank"] and b["lowest"] and a["lowest"] and b["lowest"] > a["lowest"]:
                 if r.get("isArcane"):
                     need = arcane_copies_for(r["maxRank"])
@@ -199,13 +201,16 @@ def run(mods_path, all_sellers=False, from_prices=False):
     for m in json.load(open(mods_path)):
         if "riven" in m:
             continue  # rivens are traded on the separate riven auction market
-        o = owned.setdefault(m["uniqueName"], {"name": m["name"], "owned": 0, "ranks": {}})
+        # relics: one entry per refinement, priced separately
+        o = owned.setdefault((m["uniqueName"], m.get("subtype")),
+                             {"name": m["name"], "subtype": m.get("subtype"),
+                              "owned": 0, "ranks": {}})
         o["owned"] += m["count"]
         o["ranks"][m["rank"]] = o["ranks"].get(m["rank"], 0) + m["count"]
 
     market = {i["gameRef"]: i for i in get("/items") if i.get("gameRef")}
-    todo = [(ref, o, market[ref]) for ref, o in owned.items() if ref in market]
-    print(f"{len(owned)} mods owned, {len(todo)} tradable on warframe.market")
+    todo = [(ref, o, market[ref]) for (ref, _), o in owned.items() if ref in market]
+    print(f"{len(owned)} owned, {len(todo)} tradable on warframe.market")
     print(f"live ranking: {out_dir / (prefix + 'sell-candidates.json')}")
 
     results = []
@@ -215,13 +220,15 @@ def run(mods_path, all_sellers=False, from_prices=False):
         orders = get(f"/orders/item/{item['slug']}") or []
         time.sleep(DELAY)
         max_rank = item.get("maxRank", 0)
+        # compare like with like: mods "regular" (not atragraph), relics "intact"...
+        base = o["subtype"] or (item.get("subtypes") or [None])[0]
         sells = [x for x in orders
                  if x["type"] == "sell" and x.get("visible", True)
-                 and x.get("subtype", "regular") == "regular"
+                 and x.get("subtype", base) == base
                  and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
         r0 = [x["platinum"] for x in sells if x.get("rank", 0) == 0]
         rmax = [x["platinum"] for x in sells if x.get("rank", 0) == max_rank]
-        volume = trades_per_day(item["slug"], {0, max_rank})
+        volume = trades_per_day(item["slug"], {0, max_rank}, o["subtype"])
         time.sleep(DELAY)
         results.append({"name": o["name"], "slug": item["slug"], "owned": o["owned"],
                         "ownedRank0": o["ranks"].get(0, 0),

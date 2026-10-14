@@ -1,8 +1,10 @@
 # plat-scout
 
-Find which of your Warframe mods and arcanes are worth selling on
+Find which of your Warframe items are worth selling on
 [warframe.market](https://warframe.market), based on price, trade volume and
-how many copies you own.
+how many copies you own. Covers mods, arcanes, and everything else tradable you
+have lying around: prime parts and blueprints, relics (per refinement), Ayatan
+stars, fish, scenes...
 
 Python 3 standard library only, except the TUI which uses [Textual](https://textual.textualize.io).
 
@@ -17,7 +19,7 @@ This adds a `plat-scout` command. Data stays in this repo's `data/` folder.
 ## Usage
 
 ```
-plat-scout tui                 # interactive browser: u = update inventory, s = scan prices
+plat-scout tui                 # interactive browser: u = update inventory, s = scan tab, S = scan all
 plat-scout run                 # fetch + extract + prices, everything (~18 min)
 plat-scout top                 # best 15 mods to sell, by plat from your copies
 plat-scout top --quick         # only ones you can sell right now (no ranking up)
@@ -29,10 +31,10 @@ Step by step:
 | Command | What it does |
 |---|---|
 | `plat-scout fetch` | download your inventory (game running and logged in) |
-| `plat-scout extract` | split it into `mods.json` and `arcanes.json` |
-| `plat-scout prices [mods\|arcanes]` | scan warframe.market (~2.3 s per item) |
+| `plat-scout extract` | split it into `mods.json`, `arcanes.json` and `items.json` |
+| `plat-scout prices [mods\|arcanes\|items]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse rankings: `m`/`a` mods/arcanes, `1`-`3` ranking, `f` sell-now only, `/` search, `o` open on warframe.market, `u` update inventory, `s` scan the current tab, `x` stop |
+| `plat-scout tui` | browse rankings: `m`/`a`/`i` mods/arcanes/items, `1`-`3` ranking, `f` sell-now only, `/` search, `o` open on warframe.market, `u` update inventory, `s` scan the current tab, `S` scan all tabs, `x` stop |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
@@ -51,7 +53,7 @@ open them while the scan runs.
 | `sell-candidates-volume.json` | your copies × trades per day (price ignored) |
 | `mod-prices.json` / `.csv` | every tradable mod: lowest/average price and trades/day at rank 0 and max rank |
 
-Arcanes produce the same files with an `arcane-` prefix.
+Arcanes and items produce the same files with an `arcane-` / `item-` prefix.
 
 `--all-sellers` on `prices`/`run` counts offline sellers too (default: only
 online/in-game).
@@ -61,6 +63,8 @@ online/in-game).
 - Trade volume comes from warframe.market's v1 statistics endpoint (90 days);
   everything else uses the v2 API.
 - Rivens are skipped: they trade on the separate riven auction market.
+- Built frames and weapons are skipped: only loose parts and blueprints can be
+  traded. Resources (Ferrite, Rubedo...) aren't tradable either.
 - "Already maxed" copies may be the ones you have equipped.
 - `data/` is git-ignored: `inventory.json` contains your account ID.
 - Reading the session token from game memory is a grey area under DE's terms

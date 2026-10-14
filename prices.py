@@ -165,6 +165,17 @@ def candidates_all(results):
     return out
 
 
+SERIOUS_BUY = 0.5  # buy orders below half the lowest sell price are lowballs, not demand
+
+
+def buyer_demand(buy_orders, lowest_sell):
+    """Copies online buyers want at a price close to what sellers ask."""
+    if lowest_sell is None:
+        return 0
+    return sum(x.get("quantity", 1) for x in buy_orders
+               if x["platinum"] >= lowest_sell * SERIOUS_BUY)
+
+
 def sellable_copies(trades_per_day, buy_demand=0, bulk=False):
     """How many copies the market should absorb in WEEK days."""
     by_history = trades_per_day * WEEK
@@ -293,8 +304,10 @@ def run(mods_path, all_sellers=False, from_prices=False):
                 and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
         def plat(kind, rank):
             return [x["platinum"] for x in live if x["type"] == kind and x.get("rank", 0) == rank]
-        def demand(rank):  # copies online buyers want right now
-            return sum(x.get("quantity", 1) for x in live if x["type"] == "buy" and x.get("rank", 0) == rank)
+        def demand(rank):
+            sells = plat("sell", rank)
+            return buyer_demand([x for x in live if x["type"] == "buy" and x.get("rank", 0) == rank],
+                                min(sells) if sells else None)
         r0, rmax = (plat("sell", 0), plat("buy", 0)), (plat("sell", max_rank), plat("buy", max_rank))
         days = closed_days(item["slug"])
         volume = trades_per_day(days, {0, max_rank}, o["subtype"])
@@ -309,8 +322,9 @@ def run(mods_path, all_sellers=False, from_prices=False):
                     continue
                 st = stats([x["platinum"] for x in online if x["type"] == "sell" and x.get("subtype") == sub],
                            [x["platinum"] for x in online if x["type"] == "buy" and x.get("subtype") == sub])
-                st["buyDemand"] = sum(x.get("quantity", 1) for x in online
-                                      if x["type"] == "buy" and x.get("subtype") == sub)
+                st["buyDemand"] = buyer_demand([x for x in online
+                                                if x["type"] == "buy" and x.get("subtype") == sub],
+                                               st["lowest"])
                 st["soldAvg"] = sold_price(days, sub)
                 if st["lowest"] is None and st["soldAvg"]:
                     # nobody online selling this level: fall back to what it sold for

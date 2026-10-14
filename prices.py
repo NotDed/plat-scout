@@ -51,12 +51,14 @@ def get(path, base=API, key="data"):
     raise RuntimeError(f"giving up on {path}")
 
 
-def stats(prices):
+def stats(prices, buys=()):
+    """Sell-side summary plus the best buy order (instant-sale price)."""
+    best_buy = max(buys) if buys else None
     if not prices:
-        return {"lowest": None, "average": None, "sellers": 0}
+        return {"lowest": None, "average": None, "sellers": 0, "bestBuy": best_buy}
     return {"lowest": min(prices),
             "average": round(statistics.mean(prices), 1),
-            "sellers": len(prices)}
+            "sellers": len(prices), "bestBuy": best_buy}
 
 
 # Void Traces to refine a relic from intact to each level.
@@ -154,6 +156,7 @@ def candidates_all(results):
             out.append({"name": r["name"], "action": action, "lowestPrice": p["lowest"],
                         "averagePrice": p["average"], "tradesPerDay": p["tradesPerDay"],
                         "onlineSellers": p["sellers"], "yourCopies": copies,
+                        "bestBuy": p.get("bestBuy"), "ducats": r.get("ducats", 0),
                         "score": round(p["lowest"] * p["tradesPerDay"], 1),
                         "url": f"https://warframe.market/items/{r['slug']}",
                         **({"refinements": refs} if refs else {})})
@@ -184,6 +187,32 @@ def volume_candidates(results):
     return out[:TOP]
 
 
+DUCAT_RATIO = 10  # Baro rule of thumb: ~10 ducats per plat is a fair trade
+
+
+def ducat_candidates(results):
+    """Prime parts worth more as ducats (Baro Ki'Teer) than as plat."""
+    out = []
+    for r in results:
+        ducats, price = r.get("ducats", 0), r["rank0"]["lowest"]
+        if not ducats or not r["ownedRank0"]:
+            continue
+        ratio = ducats / price if price else None
+        if ratio is not None and ratio < DUCAT_RATIO:
+            continue
+        out.append({"name": r["name"],
+                    "action": f"trade to Baro: {ducats} ducats each"
+                              + (f" ({ratio:.0f} ducats per plat)" if ratio else " (no one selling)"),
+                    "lowestPrice": price, "averagePrice": r["rank0"]["average"],
+                    "bestBuy": r["rank0"].get("bestBuy"),
+                    "tradesPerDay": r["rank0"]["tradesPerDay"],
+                    "onlineSellers": r["rank0"]["sellers"], "yourCopies": r["ownedRank0"],
+                    "ducats": ducats, "score": ducats * r["ownedRank0"],
+                    "url": f"https://warframe.market/items/{r['slug']}"})
+    out.sort(key=lambda c: -c["score"])
+    return out
+
+
 def write_candidates(out_dir, results, progress_text, prefix=""):
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     write_json(out_dir / f"{prefix}sell-candidates.json", {
@@ -198,6 +227,10 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
         "updated": now, "progress": progress_text,
         "score": "copies you own x trades per day (price ignored, still >= 5p)",
         "candidates": volume_candidates(results)})
+    write_json(out_dir / f"{prefix}ducat-candidates.json", {
+        "updated": now, "progress": progress_text,
+        "score": f"total ducats (parts worth >= {DUCAT_RATIO} ducats per plat)",
+        "candidates": ducat_candidates(results)})
 
 
 def main():
@@ -246,24 +279,25 @@ def run(mods_path, all_sellers=False, from_prices=False):
         max_rank = item.get("maxRank", 0)
         # compare like with like: mods "regular" (not atragraph), relics "intact"...
         base = o["subtype"] or (item.get("subtypes") or [None])[0]
-        sells = [x for x in orders
-                 if x["type"] == "sell" and x.get("visible", True)
-                 and x.get("subtype", base) == base
-                 and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
-        r0 = [x["platinum"] for x in sells if x.get("rank", 0) == 0]
-        rmax = [x["platinum"] for x in sells if x.get("rank", 0) == max_rank]
+        live = [x for x in orders
+                if x.get("visible", True) and x.get("subtype", base) == base
+                and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
+        def plat(kind, rank):
+            return [x["platinum"] for x in live if x["type"] == kind and x.get("rank", 0) == rank]
+        r0, rmax = (plat("sell", 0), plat("buy", 0)), (plat("sell", max_rank), plat("buy", max_rank))
         days = closed_days(item["slug"])
         volume = trades_per_day(days, {0, max_rank}, o["subtype"])
         time.sleep(DELAY)
         refinements = None
         if o["subtype"] in REFINE_TRACES:  # relic: price every refinement level
-            online = [x for x in orders if x["type"] == "sell" and x.get("visible", True)
+            online = [x for x in orders if x.get("visible", True)
                       and (all_sellers or x["user"].get("status") in ("online", "ingame"))]
             refinements = {}
             for sub in item.get("subtypes", []):
                 if sub not in REFINE_TRACES:
                     continue
-                st = stats([x["platinum"] for x in online if x.get("subtype") == sub])
+                st = stats([x["platinum"] for x in online if x["type"] == "sell" and x.get("subtype") == sub],
+                           [x["platinum"] for x in online if x["type"] == "buy" and x.get("subtype") == sub])
                 st["soldAvg"] = sold_price(days, sub)
                 if st["lowest"] is None and st["soldAvg"]:
                     # nobody online selling this level: fall back to what it sold for
@@ -276,8 +310,9 @@ def run(mods_path, all_sellers=False, from_prices=False):
                         "ownedMax": o["ranks"].get(max_rank, 0) if max_rank else 0,
                         "maxRank": max_rank,
                         "isArcane": "arcane_enhancement" in item.get("tags", []),
-                        "rank0": {**stats(r0), "tradesPerDay": volume[0]},
-                        "maxRankPrice": {**stats(rmax), "tradesPerDay": volume[max_rank]},
+                        "ducats": item.get("ducats", 0),
+                        "rank0": {**stats(*r0), "tradesPerDay": volume[0]},
+                        "maxRankPrice": {**stats(*rmax), "tradesPerDay": volume[max_rank]},
                         **({"subtype": o["subtype"], "refinements": refinements}
                            if refinements else {})})
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)

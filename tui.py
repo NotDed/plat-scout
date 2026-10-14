@@ -18,12 +18,23 @@ REPO = Path(__file__).resolve().parent
 DATA = REPO / "data"
 # matches the progress line prices.py redraws: "[###---] 120/433  27%  ~9m12s left  Serration"
 PROGRESS = re.compile(r"(\d+)/(\d+)\s+\d+%\s+~(\S+) left\s+(.*)")
-KINDS = {"mods": "", "arcanes": "arcane-", "items": "item-"}
+KINDS = {"mods": "", "arcanes": "arcane-", "items": "item-"}  # tab -> file prefix
 RANKINGS = {  # key -> (file, score field, label)
     "owned": ("sell-candidates-owned.json", "potentialPlat", "plat from your copies (7 days)"),
     "market": ("sell-candidates.json", "score", "price × trades per day"),
     "volume": ("sell-candidates-volume.json", "volumeScore", "your copies × trades per day"),
+    "ducats": ("ducat-candidates.json", "score", "ducats at Baro (worth ≥10 ducats per plat)"),
 }
+# tabs with a single ranking of their own, made by extras.py
+SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
+           "relics": ("relic-candidates.json", "best of sell / crack / refine, × copies")}
+TABS = [("m", "mods"), ("a", "arcanes"), ("i", "items"), ("p", "sets"), ("r", "relics")]
+COLUMNS = {  # header row per tab; the 6th column's field differs
+    "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
+    "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
+    "relics": ("#", "Relic", "Total", "Sell", "Buy", "Crack", "/day", "Own", "Best action"),
+}
+NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing")
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SHADES = {"░": "#2b4a6b", "▒": "#5f8fbf", "▓": "#a8d8ff", "█": "#ffffff"}
@@ -104,12 +115,11 @@ class PlatScout(App):
     #scan-label { width: 1fr; padding: 0 0 0 2; }
     """
     BINDINGS = [
-        Binding("m", "kind('mods')", "Mods"),
-        Binding("a", "kind('arcanes')", "Arcanes"),
-        Binding("i", "kind('items')", "Items"),
-        Binding("1", "rank('owned')", "Your plat"),
-        Binding("2", "rank('market')", "Market"),
-        Binding("3", "rank('volume')", "Volume"),
+        *[Binding(key, f"kind('{kind}')", kind.title(), show=False) for key, kind in TABS],
+        Binding("1", "rank('owned')", "Your plat", show=False),
+        Binding("2", "rank('market')", "Market", show=False),
+        Binding("3", "rank('volume')", "Volume", show=False),
+        Binding("4", "rank('ducats')", "Ducats", show=False),
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
@@ -143,15 +153,19 @@ class PlatScout(App):
         yield Footer()
 
     def on_mount(self):
-        self.query_one(DataTable).add_columns(
-            "#", "Name", "Score", "Price", "Avg", "/day", "Own", "Action")
+        self.columns_for = None
         self.load()
         self.query_one(DataTable).focus()  # otherwise the hidden search box grabs keys
         self.set_interval(3, self.reload_if_changed)  # follows a running scan
 
     # ---- data -------------------------------------------------------------
     def path(self):
+        if self.kind in SPECIAL:
+            return DATA / SPECIAL[self.kind][0]
         return DATA / (KINDS[self.kind] + RANKINGS[self.ranking][0])
+
+    def field(self):
+        return "score" if self.kind in SPECIAL else RANKINGS[self.ranking][1]
 
     def load(self):
         p = self.path()
@@ -172,49 +186,72 @@ class PlatScout(App):
     def visible(self):
         rows = self.meta.get("candidates", [])
         if self.quick:
-            rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse", "refine"))]
+            rows = [c for c in rows if not c["action"].startswith(NEEDS_WORK)]
         if self.search_text:
             rows = [c for c in rows if self.search_text.lower() in c["name"].lower()]
         return rows
 
     # ---- drawing ----------------------------------------------------------
     def refresh_view(self):
-        field = RANKINGS[self.ranking][1]
+        field = self.field()
         self.rows = self.visible()
         table = self.query_one(DataTable)
-        table.clear()
-        top = max((c[field] for c in self.rows), default=1) or 1
+        layout = self.kind if self.kind in COLUMNS else "default"
+        if self.columns_for != layout:
+            table.clear(columns=True)
+            table.add_columns(*COLUMNS[layout])
+            self.columns_for = layout
+        else:
+            table.clear()
+        sixth = "missingCost" if self.kind == "sets" else "averagePrice"
+        plat = lambda v: f"{v}p" if v is not None else "-"
+        top = max((c[field] or 0 for c in self.rows), default=1) or 1
         for i, c in enumerate(self.rows, 1):
-            heat = c[field] / top
+            heat = (c[field] or 0) / top
             color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
-            action_color = "#ff9f5a" if c["action"].startswith(("rank to", "fuse", "refine")) else "#3ddc84"
+            action_color = "#ff9f5a" if c["action"].startswith(NEEDS_WORK) else "#3ddc84"
             table.add_row(
                 Text(str(i), style="#5b6680"),
                 Text(c["name"], style="bold #e8eefc"),
-                Text(f"{c[field]:,}", style=f"bold {color}", justify="right"),
-                Text(f"{c['lowestPrice']}p", style="#9fd8ff", justify="right"),
-                Text(f"{c['averagePrice']}p", style="#6f87a8", justify="right"),
-                Text(f"{c['tradesPerDay']}", justify="right"),
-                Text(f"{c['yourCopies']}", justify="right"),
+                Text(f"{c[field] or 0:,}", style=f"bold {color}", justify="right"),
+                Text(plat(c.get("lowestPrice")), style="#9fd8ff", justify="right"),
+                Text(plat(c.get("bestBuy")), style="#c39bff", justify="right"),
+                Text(plat(c.get(sixth)), style="#6f87a8", justify="right"),
+                Text(f"{c.get('tradesPerDay', 0)}", justify="right"),
+                Text(f"{c.get('yourCopies', '')}", justify="right"),
                 Text(c["action"], style=action_color),
                 key=str(i))
         self.draw_headline()
         self.draw_detail(self.rows[0] if self.rows else None)
 
     def draw_headline(self):
-        label = RANKINGS[self.ranking][2]
-        tab = lambda k, name: f"[reverse b #9fd8ff] {name} [/]" if k == self.kind else f" [#5b6680]{name}[/] "
+        special = self.kind in SPECIAL
+        label = SPECIAL[self.kind][1] if special else RANKINGS[self.ranking][2]
+        tabs = "  ".join(f"[reverse b #9fd8ff] {key} {kind.upper()} [/]" if kind == self.kind
+                         else f"[#e3c75b]{key}[/] [#5b6680]{kind.upper()}[/]" for key, kind in TABS)
+        ranks = "  ".join(f"[b #e3c75b]{n} {name}[/]" if key == self.ranking and not special
+                          else f"[#5b6680]{n} {name}[/]"
+                          for n, (key, name) in enumerate([("owned", "your plat"), ("market", "market"),
+                                                           ("volume", "volume"), ("ducats", "ducats")], 1))
         if not self.meta:
             status = f"[#ff6b6b]no data yet[/] — press [b]s[/] to scan {self.kind}"
         else:
             status = f"[#5b6680]{self.meta.get('progress', '')} · updated {self.meta.get('updated', '')}[/]"
-        total = sum(c.get("potentialPlat", 0) for c in self.rows) if self.ranking == "owned" else None
-        lines = [TITLE, "",
-                 tab("mods", "MODS") + " " + tab("arcanes", "ARCANES") + " " + tab("items", "ITEMS")
-                 + f"   ranked by [b #e3c75b]{label}[/]"
+        lines = [TITLE, "", tabs,
+                 (f"[#5b6680]ranked by[/] [b #e3c75b]{label}[/]" if special else ranks)
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
-        if total is not None:
+        if self.kind == "relics":
+            total = sum(c["score"] for c in self.rows)
+            lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")
+        elif self.kind == "sets":
+            done = sum(1 for c in self.rows if c.get("complete"))
+            lines.append(f"[b #3ddc84]▲ {done}[/] [#8a93a6]complete set(s) ready to sell[/]")
+        elif self.ranking == "ducats":
+            total = sum(c["score"] for c in self.rows)
+            lines.append(f"[b #e3c75b]◆ {total:,} ducats[/] [#8a93a6]from {len(self.rows)} parts[/]")
+        elif self.ranking == "owned":
+            total = sum(c.get("potentialPlat", 0) for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]you could make from the {len(self.rows)} listed[/]")
         self.query_one("#headline", Static).update(markup("\n".join(lines)))
 
@@ -236,13 +273,35 @@ class PlatScout(App):
                     low = "~" + low  # no one online: price from past sales
                 avg = f"{p['average']}p" if p["average"] else "-"
                 extra += f"\n[#8a93a6]{sub:<12}[/] {low:>6} {avg:>6} {p['tradesPerDay']:>6}"
+        if c.get("ducats"):
+            extra += f"\n[#8a93a6]ducats (Baro)[/]       [#e3c75b]{c['ducats']}[/]"
+        if c.get("parts"):  # sets
+            extra += "\n\n[b #9fd8ff]part                 have  price[/]"
+            for p in c["parts"]:
+                mark = "[#3ddc84]✓[/]" if p["have"] >= p["need"] else "[#ff6b6b]✗[/]"
+                short = p["name"].replace(c["name"].replace(" Set", "") + " ", "")[:18]
+                low = f"{p['lowest']}p" if p["lowest"] is not None else "-"
+                extra += f"\n{mark} {short:<18} {p['have']}/{p['need']:<3} {low:>5}"
+        if c.get("crackValue"):  # relics
+            extra += "\n\n[b #9fd8ff]crack value per relic[/]"
+            for sub, v in c["crackValue"].items():
+                here = " [#3ddc84]← yours[/]" if sub == c.get("refinement") else ""
+                extra += f"\n[#8a93a6]{sub:<12}[/] {v:>6}p{here}"
+            extra += "\n\n[b #9fd8ff]best drops[/]"
+            for d in c.get("topDrops", []):
+                low = f"{d['price']}p" if d["price"] is not None else "-"
+                extra += f"\n{d['name'][:22]:<22} {d['chance']:>5}% {low:>5}"
+        plat = lambda v: f"{v}p" if v is not None else "-"
+        is_relic = "crackValue" in c
         box.update(markup(
             f"[b #e8eefc]{c['name']}[/]\n"
             f"[#ff9f5a]{c['action']}[/]\n\n"
-            f"[#8a93a6]lowest online[/]       [b #9fd8ff]{c['lowestPrice']}p[/]\n"
-            f"[#8a93a6]average online[/]      {c['averagePrice']}p\n"
-            f"[#8a93a6]online sellers[/]      {c['onlineSellers']}\n"
-            f"[#8a93a6]trades per day[/]      {c['tradesPerDay']}\n"
+            f"[#8a93a6]lowest online[/]       [b #9fd8ff]{plat(c.get('lowestPrice'))}[/]\n"
+            f"[#8a93a6]best buy order[/]      [b #c39bff]{plat(c.get('bestBuy'))}[/]\n"
+            + (f"[#8a93a6]crack value[/]         {plat(c.get('averagePrice'))}\n" if is_relic else
+               f"[#8a93a6]average online[/]      {plat(c.get('averagePrice'))}\n") +
+            f"[#8a93a6]online sellers[/]      {c.get('onlineSellers', 0)}\n"
+            f"[#8a93a6]trades per day[/]      {c.get('tradesPerDay', 0)}\n"
             f"[#8a93a6]your copies[/]         {c['yourCopies']}"
             f"{extra}"
             + ("\n[#5b6680]~ = no one online, price from past 90 days of sales[/]"
@@ -294,17 +353,22 @@ class PlatScout(App):
 
 
     # ---- scanning ---------------------------------------------------------
+    def scan_step(self, kind):
+        if kind in SPECIAL:
+            return (f"checking {kind}", ["extras.py", kind])
+        return (f"scanning {kind}", ["prices.py", str(DATA / f"{kind}.json")])
+
     def action_scan(self):
-        source = DATA / f"{self.kind}.json"
+        source = DATA / ("items.json" if self.kind in SPECIAL else f"{self.kind}.json")
         if not source.exists():
             self.notify(f"{source.name} not found. Press u to update your inventory first.",
                         severity="error")
             return
-        self.run_steps([(f"scanning {self.kind}", ["prices.py", str(source)])])
+        self.run_steps([self.scan_step(self.kind)])
 
     def action_scan_all(self):
-        steps = [(f"scanning {k}", ["prices.py", str(DATA / f"{k}.json")])
-                 for k in KINDS if (DATA / f"{k}.json").exists()]
+        steps = [self.scan_step(k) for _, k in TABS
+                 if (DATA / ("items.json" if k in SPECIAL else f"{k}.json")).exists()]
         if not steps:
             self.notify("nothing to scan. Press u to update your inventory first.", severity="error")
             return

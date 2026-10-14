@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plat-scout: find which Warframe mods and arcanes are worth selling."""
+"""plat-scout: find which of your Warframe items are worth selling."""
 
 import argparse
 import json
@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import extract
+import extras
 import fetch_inventory
 import prices
 
@@ -17,7 +18,9 @@ RANKINGS = {  # --by value -> (file suffix, field shown as "score")
     "market": ("sell-candidates.json", "score"),
     "owned": ("sell-candidates-owned.json", "potentialPlat"),
     "volume": ("sell-candidates-volume.json", "volumeScore"),
+    "ducats": ("ducat-candidates.json", "score"),
 }
+SPECIAL = {"sets": "set-candidates.json", "relics": "relic-candidates.json"}
 
 
 def kinds(which):
@@ -51,25 +54,41 @@ def cmd_rank(a):
         prices.run(DATA / KINDS[k][0], from_prices=True)
 
 
+def cmd_sets(a):
+    need(DATA / "items.json", "extract")
+    extras.sets()
+
+
+def cmd_relics(a):
+    need(DATA / "items.json", "extract")
+    extras.relics()
+
+
 def cmd_top(a):
-    name, field = RANKINGS[a.by]
-    path = DATA / (KINDS[a.kind][1] + name)
-    need(path, f"prices {a.kind}")
+    if a.kind in SPECIAL:
+        path, field = DATA / SPECIAL[a.kind], "score"
+        need(path, a.kind)
+    else:
+        name, field = RANKINGS[a.by]
+        path = DATA / (KINDS[a.kind][1] + name)
+        need(path, f"prices {a.kind}")
     data = json.load(open(path))
     rows = data["candidates"]
     if a.quick:
-        rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse", "refine"))]
+        rows = [c for c in rows if not c["action"].startswith(("rank to", "fuse", "refine", "buy ", "missing"))]
     rows = rows[:a.n]
 
-    print(f"{a.kind} by {a.by}: {data['score']}  ({data['progress']}, {data['updated']})")
+    print(f"{a.kind}{'' if a.kind in SPECIAL else ' by ' + a.by}: {data['score']}  ({data['progress']}, {data['updated']})")
     if not rows:
         print("nothing matches")
         return
     w = max(len(c["name"]) for c in rows)
-    print(f"{'#':>3}  {'name':<{w}}  {'score':>8}  {'price':>5}  {'avg':>6}  {'/day':>6}  {'own':>4}  action")
+    dash = lambda v: "-" if v is None else v
+    print(f"{'#':>3}  {'name':<{w}}  {'score':>8}  {'price':>5}  {'buy':>5}  {'avg':>6}  {'/day':>6}  {'own':>5}  action")
     for i, c in enumerate(rows, 1):
-        print(f"{i:>3}  {c['name']:<{w}}  {c[field]:>8}  {c['lowestPrice']:>5}  "
-              f"{c['averagePrice']:>6}  {c['tradesPerDay']:>6}  {c['yourCopies']:>4}  {c['action']}")
+        print(f"{i:>3}  {c['name']:<{w}}  {c[field]:>8}  {dash(c.get('lowestPrice')):>5}  "
+              f"{dash(c.get('bestBuy')):>5}  {dash(c.get('averagePrice')):>6}  "
+              f"{c.get('tradesPerDay', 0):>6}  {c.get('yourCopies', ''):>5}  {c['action']}")
 
 
 def cmd_tui(a):
@@ -81,7 +100,9 @@ def cmd_run(a):
     cmd_fetch(a)
     cmd_extract(a)
     cmd_prices(a)
-    print("\ndone. try: plat-scout top --quick")
+    cmd_sets(a)
+    cmd_relics(a)
+    print("\ndone. try: plat-scout tui")
 
 
 def main():
@@ -102,15 +123,21 @@ def main():
         s.add_argument("--all-sellers", action="store_true", help="count offline sellers too")
         s.set_defaults(func=func, auth=None)
 
+    s = sub.add_parser("sets", help="prime sets you own parts of: complete them or not?")
+    s.set_defaults(func=cmd_sets)
+
+    s = sub.add_parser("relics", help="relic crack value vs selling (needs prices items first)")
+    s.set_defaults(func=cmd_relics)
+
     s = sub.add_parser("rank", help="rebuild the rankings from saved prices (no API calls)")
     s.add_argument("kind", nargs="?", default="all", choices=[*KINDS, "all"])
     s.set_defaults(func=cmd_rank)
 
     s = sub.add_parser("top", help="show the best sell candidates in the terminal")
-    s.add_argument("kind", nargs="?", default="mods", choices=list(KINDS))
+    s.add_argument("kind", nargs="?", default="mods", choices=[*KINDS, *SPECIAL])
     s.add_argument("--by", choices=list(RANKINGS), default="owned",
                    help="market = price x trades/day, owned = plat from your copies (default), "
-                        "volume = copies x trades/day")
+                        "volume = copies x trades/day, ducats = parts worth more at Baro")
     s.add_argument("-n", type=int, default=15, help="how many rows (default 15)")
     s.add_argument("--quick", action="store_true", help="hide options that need ranking up or fusing")
     s.set_defaults(func=cmd_top)

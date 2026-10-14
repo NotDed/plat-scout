@@ -127,6 +127,8 @@ def plan(rows, pricing="match"):
             order["rank"] = rank
         if subtype:
             order["subtype"] = subtype
+        if item.get("bulkTradable"):
+            order["perTrade"] = 1  # required for bulk items: buyers can take any amount
         old = existing.get((item["id"], order.get("rank", 0), subtype))
         plans.append({**entry, "order": order, "slug": slug,
                       "existing": old and {"id": old["id"], "platinum": old["platinum"],
@@ -147,5 +149,6 @@ def post(p):
     if p.get("existing"):
         o = p["order"]
         return call("PATCH", f"/order/{p['existing']['id']}",
-                    {"platinum": o["platinum"], "quantity": o["quantity"], "visible": True})
+                    {"platinum": o["platinum"], "quantity": o["quantity"], "visible": True,
+                     **({"perTrade": o["perTrade"]} if "perTrade" in o else {})})
     return call("POST", "/order", p["order"])

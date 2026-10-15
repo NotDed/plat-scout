@@ -9,6 +9,7 @@ from pathlib import Path
 import extract
 import extras
 import fetch_inventory
+import planner
 import prices
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -21,7 +22,7 @@ RANKINGS = {  # --by value -> (file suffix, field shown as "score")
     "ducats": ("ducat-candidates.json", "score"),
     "crack": ("candidates.json", "score"),  # relics only: sell vs crack vs refine
 }
-SPECIAL = {"sets": "set-candidates.json"}
+SPECIAL = {"sets": "set-candidates.json", "trades": "trade-plan.json"}
 
 
 def kinds(which):
@@ -63,6 +64,11 @@ def cmd_sets(a):
 def cmd_relics(a):
     need(DATA / "relics.json", "extract")
     extras.relics()
+
+
+def cmd_plan(a):
+    need(DATA / "inventory.json", "fetch")
+    planner.main()
 
 
 def cmd_top(a):
@@ -108,6 +114,7 @@ def cmd_run(a):
     cmd_prices(a)
     cmd_sets(a)
     cmd_relics(a)
+    cmd_plan(a)
     print("\ndone. try: plat-scout tui")
 
 
@@ -134,6 +141,9 @@ def main():
 
     s = sub.add_parser("relics", help="relic crack value vs selling (needs prices relics first)")
     s.set_defaults(func=cmd_relics)
+
+    s = sub.add_parser("plan", help="plan today's trades (MR trades/day, credit tax)")
+    s.set_defaults(func=cmd_plan)
 
     s = sub.add_parser("rank", help="rebuild the rankings from saved prices (no API calls)")
     s.add_argument("kind", nargs="?", default="all", choices=[*KINDS, "all"])

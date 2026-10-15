@@ -111,7 +111,7 @@ def cmd_tui(a):
 def cmd_run(a):
     cmd_fetch(a)
     cmd_extract(a)
-    print(f"cleared {prices.clear_results(['mods', 'arcanes', 'items', 'relics', 'sets', 'trades'])}"
+    print(f"cleared {prices.clear_results(['mods', 'arcanes', 'items', 'relics', 'sets'])}"
           " old result files")
     cmd_prices(a)
     cmd_sets(a)

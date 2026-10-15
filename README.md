@@ -37,8 +37,8 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, trades), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
-| `plat-scout plan` | day-by-day trade plan (see TRADES below), no new price scan |
+| `plat-scout tui` | browse everything: `1`-`5` or `←`/`→` tabs (mods, arcanes, items, sets, relics), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout plan` | day-by-day trade plan (see below), no new price scan |
 | `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
@@ -70,17 +70,17 @@ online seller of the same item, rank and subtype. Undercut ones are flagged;
 `y` reprices them (match the cheapest, or `p` for 1p under). Nothing changes
 without `y`.
 
-## Trade planner (TRADES tab)
+## Trade planner (`plat-scout plan`)
 
 Warframe allows as many trades per day as your Mastery Rank, and every item
-traded costs credits. `plat-scout plan` (or `s` on the TRADES tab) takes every
+traded costs credits. `plat-scout plan` (then `plat-scout top trades`) takes every
 sell-now option from the saved scans plus complete prime sets, treats each
 buyer as one trade (bulk items like relics: up to 6 copies per trade), fetches
 each item's credit tax once (cached in `data/cache/trading-tax.json`), and
 fills today's remaining trades first, then MR trades per day, best plat per
 trade first. Trades costing more than 2,000 credits per plat are skipped, as is
-anything beyond your credits. The header shows today's plat, tax and how many
-days it takes to sell everything.
+anything beyond your credits. It prints today's plat, tax and how many days it
+takes to sell everything.
 
 ## Signals
 
@@ -112,7 +112,7 @@ plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 |---|---|
 | `set-candidates.json` | prime sets you own parts of: what's missing, its cost, and the gain vs selling parts |
 | `relic-candidates.json` | per relic: sell price vs expected crack value at each refinement, best action |
-| `trade-plan.json` | the TRADES tab: day, trades, tax and plat per item |
+| `trade-plan.json` | `plat-scout plan`: day, trades, tax and plat per item |
 | `history.jsonl` | sell-now worth per tab after every scan |
 
 Every price comes with the best online **buy order** too: what someone will pay

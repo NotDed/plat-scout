@@ -33,10 +33,8 @@ RANKINGS = {  # key -> (file, score field, label)
     "crack": ("candidates.json", "score", "best of sell / crack / refine, × copies"),
 }
 # tabs with a single ranking of their own, made by extras.py
-SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
-           "trades": ("trade-plan.json", "best trades first, day by day")}
-TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics"),
-        ("6", "trades")]
+SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set")}
+TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics")]
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
 RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
                     ("volume", "volume")]
@@ -49,9 +47,6 @@ COLUMNS = {  # per tab layout: (header, field); "score" = the ranking's own scor
     "sets": [("#", "#"), ("Set", "name"), ("Gain", "score"), ("Set", "lowestPrice"),
              ("Buy", "bestBuy"), ("Missing", "missingCost"), ("/day", "tradesPerDay"),
              ("Trend", "trend"), ("Parts", "yourCopies"), ("Action", "action")],
-    "trades": [("#", "#"), ("Item", "name"), ("Plat", "score"), ("Day", "dayLabel"),
-               ("Trades", "trades"), ("Tax", "tax"), ("Price", "expectedPrice"), ("Buy", "bestBuy"),
-               ("Trend", "trend"), ("Qty", "yourCopies"), ("Action", "action")],
     "relics": [("#", "#"), ("Relic", "name"), ("Potential", "score"), ("Sell", "lowestPrice"),
                ("Buy", "bestBuy"), ("Crack", "averagePrice"), ("/day", "tradesPerDay"),
                ("Trend", "trend"), ("Own", "yourCopies"), ("Best action", "action")],
@@ -691,11 +686,6 @@ class PlatScout(App):
         if self.kind == "relics" and self.ranking == "crack":
             total = sum(c["score"] for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")
-        elif self.kind == "trades" and self.meta:
-            m = self.meta
-            lines.append(f"[#8a93a6]MR {m['mr']} → {m['tradesPerDay']} trades/day ({m['tradesLeftToday']} left today)"
-                         f" · today[/] [b #3ddc84]~{m['todayPlat']:,}p[/] [#8a93a6]for {m['todayTax']:,} credits tax"
-                         f" (you have {m['credits']:,}) · {m['daysNeeded']} days to sell everything[/]")
         elif self.kind == "sets":
             done = sum(1 for c in self.rows if c.get("complete"))
             lines.append(f"[b #3ddc84]▲ {done}[/] [#8a93a6]complete set(s) ready to sell[/]")
@@ -822,8 +812,8 @@ class PlatScout(App):
 
     def layout(self):
         """Which header row the table uses."""
-        if self.kind in ("sets", "trades"):
-            return self.kind
+        if self.kind == "sets":
+            return "sets"
         return "relics" if self.kind == "relics" and self.ranking == "crack" else "default"
 
     def action_kind(self, kind):
@@ -960,8 +950,6 @@ class PlatScout(App):
     def scan_steps(self, kind):
         if kind == "sets":
             return [("checking sets", ["extras.py", "sets"])]
-        if kind == "trades":
-            return [("planning trades", ["planner.py"])]
         steps = [(f"scanning {kind}", ["prices.py", str(DATA / f"{kind}.json")])]
         if kind == "relics":  # crack values need the relic prices just scanned
             steps.append(("working out crack values", ["extras.py", "relics"]))
@@ -969,8 +957,6 @@ class PlatScout(App):
 
     @staticmethod
     def source(kind):
-        if kind == "trades":
-            return DATA / "inventory.json"
         return DATA / ("items.json" if kind == "sets" else f"{kind}.json")
 
     def clear_for(self, kinds):

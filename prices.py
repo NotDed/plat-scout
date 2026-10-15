@@ -361,7 +361,6 @@ OUTPUTS = {
     "relics": ["relic-prices.*", "relic-sell-candidates*.json", "relic-ducat-candidates.json",
                "relic-candidates.json"],
     "sets": ["set-candidates.json"],
-    "trades": ["trade-plan.json"],
 }
 
 

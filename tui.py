@@ -597,21 +597,28 @@ class PlatScout(App):
                 extra += f"\n{d['name'][:22]:<22} {d['chance']:>5}% {low:>5}"
         plat = lambda v: f"{v}p" if v is not None else "-"
         is_relic = "crackValue" in c
-        box.update(markup(
-            f"[b #e8eefc]{c['name']}[/]\n"
-            f"[#ff9f5a]{c['action']}[/]\n\n"
-            f"[#8a93a6]lowest online[/]       [b #9fd8ff]{plat(c.get('lowestPrice'))}[/]\n"
-            f"[#8a93a6]best buy order[/]      [b #c39bff]{plat(c.get('bestBuy'))}[/]\n"
-            + (f"[#8a93a6]crack value[/]         {plat(c.get('averagePrice'))}\n" if is_relic else
-               f"[#8a93a6]typical (5 cheapest)[/] {plat(c.get('averagePrice'))}\n") +
-            + (f"[#8a93a6]sold for (90 days)[/]  {plat(c.get('soldAvg'))}\n" if not is_relic else "") +
-            f"[#8a93a6]online sellers[/]      {c.get('onlineSellers', 0)}\n"
-            f"[#8a93a6]trades per day[/]      {c.get('tradesPerDay', 0)}\n"
-            f"[#8a93a6]your copies[/]         {c['yourCopies']}"
-            f"{extra}"
-            + ("\n[#5b6680]~ = no one online, price from past 90 days of sales[/]"
-               if refs and any(p.get("fromHistory") for p in refs.values()) else "")
-            + f"\n\n[#5b6680][b]o[/b] open on warframe.market · [b]space[/b] select · [b]l[/b] list it[/]"))
+        lines = [
+            f"[b #e8eefc]{c['name']}[/]",
+            f"[#ff9f5a]{c['action']}[/]",
+            "",
+            f"[#8a93a6]lowest online[/]       [b #9fd8ff]{plat(c.get('lowestPrice'))}[/]",
+            f"[#8a93a6]best buy order[/]      [b #c39bff]{plat(c.get('bestBuy'))}[/]",
+        ]
+        if is_relic:
+            lines.append(f"[#8a93a6]crack value[/]         {plat(c.get('averagePrice'))}")
+        else:
+            lines.append(f"[#8a93a6]typical (5 cheapest)[/] {plat(c.get('averagePrice'))}")
+            lines.append(f"[#8a93a6]sold for (90 days)[/]  {plat(c.get('soldAvg'))}")
+        lines += [
+            f"[#8a93a6]online sellers[/]      {c.get('onlineSellers', 0)}",
+            f"[#8a93a6]trades per day[/]      {c.get('tradesPerDay', 0)}",
+            f"[#8a93a6]your copies[/]         {c.get('yourCopies', '')}{extra}",
+        ]
+        if refs and any(p.get("fromHistory") for p in refs.values()):
+            lines.append("[#5b6680]~ = no one online, price from past 90 days of sales[/]")
+        lines += ["", "[#5b6680][b]o[/b] open on warframe.market · [b]space[/b] select ·"
+                      " [b]l[/b] list it[/]"]
+        box.update(markup("\n".join(lines)))
 
     # ---- events -----------------------------------------------------------
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):

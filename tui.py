@@ -582,6 +582,9 @@ class PlatScout(App):
                    if t.get("volumePct") is not None and t.get("signal") else "")
             extra += (f"\n[#8a93a6]last 7 vs 90 days[/]   {plat(t.get('price7'))} vs"
                       f" {plat(t['price90'])}{pct}{vol}")
+        if c.get("endoCost"):
+            extra += (f"\n[#8a93a6]ranking it costs[/]    {c['endoCost']:,} endo · {c['creditCost']:,} credits"
+                      f"\n[#8a93a6]plat per 1,000 endo[/] [b #e3c75b]{c['platPerKEndo']}[/]")
         if c.get("vaulted"):
             extra += "\n[#e3c75b]vaulted[/] [#8a93a6]· prices tend to rise while vaulted, consider holding[/]"
         if c.get("buyDemand"):

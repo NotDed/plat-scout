@@ -174,6 +174,16 @@ def candidates(results):
     return candidates_all(results)[:TOP]
 
 
+ENDO_BASE = {"Common": 10, "Uncommon": 20, "Rare": 30, "Legendary": 40}
+CREDITS_PER_ENDO = 48.3  # fusing costs ~48 credits per endo spent
+
+
+def endo_to_max(rarity, max_rank):
+    """Endo to rank a mod from 0 to max_rank: base x (2^max - 1)."""
+    base = ENDO_BASE.get(rarity)
+    return base * (2 ** max_rank - 1) if base and max_rank else None
+
+
 def expected_price(p):
     """What a copy will realistically sell for: the cheapest ask, unless the item
     actually trades for less (relics list at 30p but sell at ~2p in bulk)."""
@@ -198,7 +208,9 @@ def candidates_all(results):
                         options.append((f"fuse {need} copies into rank {r['maxRank']}, then sell",
                                         b, r["ownedRank0"] // need))
                 else:
-                    options.append((f"rank to {r['maxRank']} first, then sell", b, r["ownedRank0"]))
+                    endo = endo_to_max(r.get("rarity"), r["maxRank"])
+                    cost = f" (~{endo:,} endo each)" if endo else ""
+                    options.append((f"rank to {r['maxRank']} first, then sell{cost}", b, r["ownedRank0"]))
         if r["ownedMax"] and r["maxRank"]:
             spare = " (spare copy)" if r.get("equipped") else ""
             options.append((f"sell at rank {r['maxRank']} (already maxed){spare}", b, r["ownedMax"]))
@@ -215,8 +227,14 @@ def candidates_all(results):
             exp = expected_price(p)
             if not exp or exp < MIN_PRICE or p["tradesPerDay"] < MIN_TRADES:
                 continue
+            rank_up = {}
+            if action.startswith("rank to") and endo_to_max(r.get("rarity"), r["maxRank"]):
+                endo = endo_to_max(r.get("rarity"), r["maxRank"])
+                gain = exp - (expected_price(a) or 0)  # extra plat per copy for ranking it
+                rank_up = {"endoCost": endo, "creditCost": round(endo * CREDITS_PER_ENDO),
+                           "platPerKEndo": round(gain / endo * 1000, 2)}
             out.append({"name": r["name"], "action": action, "lowestPrice": p["lowest"],
-                        "expectedPrice": exp,
+                        "expectedPrice": exp, **rank_up,
                         "averagePrice": p["average"], "tradesPerDay": p["tradesPerDay"],
                         "onlineSellers": p["sellers"], "yourCopies": copies,
                         "bestBuy": p.get("bestBuy"), "ducats": r.get("ducats", 0),
@@ -329,7 +347,7 @@ def owned_copies(path):
         # relics: one entry per refinement, priced separately
         o = owned.setdefault((m["uniqueName"], m.get("subtype")),
                              {"name": m["name"], "subtype": m.get("subtype"),
-                              "owned": 0, "ranks": {}, "equipped": 0})
+                              "rarity": m.get("rarity"), "owned": 0, "ranks": {}, "equipped": 0})
         if m.get("equipped"):
             o["equipped"] += m["count"]
             continue
@@ -345,7 +363,7 @@ def refresh_counts(results, owned):
         o = by_name.get((r["name"], r.get("subtype")))
         if not o:
             continue
-        r["owned"], r["equipped"] = o["owned"], o["equipped"]
+        r["owned"], r["equipped"], r["rarity"] = o["owned"], o["equipped"], o["rarity"]
         r["ownedRank0"] = o["ranks"].get(0, 0)
         r["ownedMax"] = o["ranks"].get(r["maxRank"], 0) if r["maxRank"] else 0
 
@@ -426,6 +444,7 @@ def run(mods_path, all_sellers=False, from_prices=False):
                 refinements[sub] = st
         results.append({"name": o["name"], "slug": item["slug"], "owned": o["owned"],
                         "ownedRank0": o["ranks"].get(0, 0), "equipped": o["equipped"],
+                        "rarity": o["rarity"],
                         "ownedMax": o["ranks"].get(max_rank, 0) if max_rank else 0,
                         "maxRank": max_rank,
                         "isArcane": "arcane_enhancement" in item.get("tags", []),

@@ -3,7 +3,7 @@ name = "plat-scout"
 version = "0.1.0"
 description = "Find which Warframe mods and arcanes are worth selling on warframe.market"
 requires-python = ">=3.9"
-dependencies = ["textual>=0.80"]
+dependencies = ["textual>=0.80", "websockets>=13"]
 
 [project.scripts]
 plat-scout = "cli:main"
@@ -13,4 +13,4 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["cli", "extract", "extras", "fetch_inventory", "alerts", "buying", "gamelog", "listing", "planner", "prices", "tui"]
+py-modules = ["cli", "extract", "extras", "fetch_inventory", "alerts", "buying", "gamelog", "listing", "planner", "prices", "status", "tui"]

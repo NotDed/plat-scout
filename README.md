@@ -66,9 +66,15 @@ warframe.market in your browser, F12 → Application/Storage → Cookies →
 verified on warframe.market to create orders.
 
 Press `w` for **My listings**: each of your sell orders vs the cheapest *other*
-online seller of the same item, rank and subtype. Undercut ones are flagged;
-`y` reprices them (match the cheapest, or `p` for 1p under). Nothing changes
-without `y`.
+online seller of the same item, rank and subtype. `↑↓` choose a listing, `e`
+edits its price and quantity (Enter saves), `h` hides / shows it, `y` reprices
+every undercut one (match the cheapest, or `p` for 1p under), `r` refreshes.
+
+**Status:** whenever plat-scout posts, edits, shows or reprices a listing, it
+sets your warframe.market status to **in game** for 3 hours (buyers mostly
+contact sellers who are in game), unless you're already in game for longer.
+It uses warframe.market's websocket with the same token; change the duration
+with `"ingameHours"` in `data/settings.json` (max 6).
 
 ## Buying (BUY tab, `6`)
 

@@ -316,6 +316,8 @@ class ReviewScreen(ModalScreen):
             time.sleep(0.4)  # stay under the market's rate limit
         ok = sum(1 for _, err in results if err is None)
         lines = [f"[b #e8eefc]Posted {ok} of {len(results)}[/]", ""]
+        if ok:
+            lines.insert(1, f"[#8a93a6]{go_ingame()}[/]")
         for name, err in results:
             lines.append(f"[#3ddc84]✓[/] {name}" if err is None else f"[#ff6b6b]✗ {name}: {err}[/]")
         lines += ["", "[#8a93a6]check them at warframe.market → your profile · details in data/listing.log[/]",
@@ -664,24 +666,47 @@ class CloseSoldScreen(ModalScreen):
         self.app.call_from_thread(self.query_one("#review-body", Static).update, markup("\n".join(lines)))
 
 
+def go_ingame():
+    """After posting / editing: set warframe.market status to in game (thread-safe)."""
+    import status
+    try:
+        return f"status: {status.set_ingame()}"
+    except Exception as e:
+        return f"status not changed: {e}"
+
+
 class WatchScreen(ModalScreen):
-    """Your warframe.market listings vs the cheapest other seller; reprice on y."""
-    CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen")
-    BINDINGS = [Binding("y", "reprice", "Reprice undercut"), Binding("p", "mode", "Match/undercut"),
-                Binding("r", "refresh", "Refresh"), Binding("escape", "dismiss", "Close")]
+    """Your warframe.market listings: undercut check, reprice, edit, hide/show."""
+    CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen") + """
+    #edit-form { height: auto; display: none; margin: 1 0 0 0; }
+    #edit-form Input { width: 1fr; border: tall #e3c75b; }
+    """
+    BINDINGS = [Binding("up", "move(-1)", show=False, priority=True),
+                Binding("down", "move(1)", show=False, priority=True),
+                Binding("e", "edit", "Edit"), Binding("h", "hide", "Hide/show"),
+                Binding("y", "reprice", "Reprice undercut"), Binding("p", "mode", "Match/undercut"),
+                Binding("r", "refresh", "Refresh"), Binding("escape", "close", "Close", priority=True)]
     STATUS = {"cheapest": "#3ddc84", "undercut": "#ff6b6b", "only seller online": "#3ddc84",
               "hidden": "#5b6680"}
+    AUTO_FOCUS = None
+    TYPING_OFF = {"move", "edit", "hide", "reprice", "mode", "refresh"}
 
     def __init__(self):
         super().__init__()
-        self.rows, self.mode, self.busy, self.error = [], "match", False, None
+        self.rows, self.mode, self.busy, self.error, self.pick, self.note = [], "match", False, None, 0, ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
             yield Static(id="review-body")
+            with Horizontal(id="edit-form"):
+                yield Input(placeholder="price (p)", id="edit-price", disabled=True)
+                yield Input(placeholder="quantity", id="edit-qty", disabled=True)
 
     def on_mount(self):
         self.load()
+
+    def check_action(self, action, parameters):
+        return not (isinstance(self.focused, Input) and action in self.TYPING_OFF)
 
     @work(exclusive=True, thread=True)
     def load(self):
@@ -691,6 +716,7 @@ class WatchScreen(ModalScreen):
             self.rows, self.error = listing.watch(), None
         except Exception as e:  # no token, expired token, network…
             self.rows, self.error = [], str(e) or type(e).__name__
+        self.pick = min(self.pick, max(len(self.rows) - 1, 0))
         self.app.call_from_thread(self.draw)
 
     def draw(self):
@@ -702,20 +728,32 @@ class WatchScreen(ModalScreen):
             mode = "match the cheapest" if self.mode == "match" else "undercut by 1p"
             lines = [f"[b #e8eefc]My listings[/]  [#8a93a6]{len(self.rows)} sell orders ·"
                      f" {len(undercut)} undercut · reprice mode:[/] [b #e3c75b]{mode}[/]", "",
-                     f"[b #9fd8ff]{'item':<30} {'rank':>4} {'qty':>4} {'mine':>6} {'lowest':>7}  status[/]"]
-            for r in self.rows:
+                     f"[b #9fd8ff]  {'item':<30} {'rank':>4} {'qty':>4} {'mine':>6} {'lowest':>7}  status[/]"]
+            for n, r in enumerate(self.rows):
                 color = self.STATUS.get(r["status"], "")
                 low = f"{r['lowestOther']}p" if r["lowestOther"] is not None else "-"
                 what = r["status"]
                 if r["status"] == "undercut":
                     what += f" by {r['undercutBy']}p → {listing.reprice(r, self.mode)}p"
-                lines.append(f"{r['name'][:30]:<30} {r['rank'] if r['rank'] is not None else '':>4}"
-                             f" {r['quantity'] or '':>4} {r['myPrice']:>5}p {low:>7}  [{color}]{what}[/]")
+                line = (f"{r['name'][:30]:<30} {r['rank'] if r['rank'] is not None else '':>4}"
+                        f" {r['quantity'] or '':>4} {r['myPrice']:>5}p {low:>7}  [{color}]{what}[/]")
+                lines.append(f"[reverse b #9fd8ff]▶[/] {line}" if n == self.pick else f"  {line}")
             if not self.rows:
                 lines.append("[#5b6680]no sell orders on your account[/]")
-            lines += ["", (f"[b #3ddc84]y[/] reprice {len(undercut)} · " if undercut else "")
-                      + "[b]p[/] match/undercut · [b]r[/] refresh · [b]esc[/] close"]
+            lines += ["", "[#8a93a6]↑↓ choose · [b]e[/b] edit price/qty · [b]h[/b] hide/show ·"
+                          + (f" [b]y[/b] reprice {len(undercut)} undercut ·" if undercut else "")
+                          + " [b]p[/b] match/undercut · [b]r[/b] refresh · Esc close[/]"]
+        if self.note:
+            lines += ["", self.note]
         self.query_one("#review-body", Static).update(markup("\n".join(lines)))
+
+    def current(self):
+        return self.rows[self.pick] if self.rows and 0 <= self.pick < len(self.rows) else None
+
+    def action_move(self, step):
+        if self.rows:
+            self.pick = (self.pick + step) % len(self.rows)
+            self.draw()
 
     def action_mode(self):
         self.mode = "undercut" if self.mode == "match" else "match"
@@ -723,8 +761,78 @@ class WatchScreen(ModalScreen):
 
     def action_refresh(self):
         if not self.busy:
+            self.note = ""
             self.load()
 
+    # ---- edit / hide ----------------------------------------------------
+    def action_edit(self):
+        r = self.current()
+        if not r or self.busy:
+            return
+        price, qty = self.query_one("#edit-price", Input), self.query_one("#edit-qty", Input)
+        price.value, qty.value = str(r["myPrice"]), str(r["quantity"] or 1)
+        for box in (price, qty):
+            box.disabled = False
+        self.query_one("#edit-form").display = True
+        self.note = f"[#e3c75b]editing {r['name']}: Tab between fields, Enter saves, Esc cancels[/]"
+        self.draw()
+        price.focus()
+
+    def close_form(self):
+        self.query_one("#edit-form").display = False
+        for box in self.query("#edit-form Input"):
+            box.disabled = True
+        self.set_focus(None)
+
+    def on_input_changed(self, event: Input.Changed):
+        event.stop()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        event.stop()
+        r = self.current()
+        try:
+            price = int(self.query_one("#edit-price", Input).value)
+            qty = int(self.query_one("#edit-qty", Input).value)
+            assert price >= 1 and qty >= 1
+        except (ValueError, AssertionError):
+            self.note = "[#ff6b6b]price and quantity must be whole numbers, at least 1[/]"
+            self.draw()
+            return
+        self.close_form()
+        self.change(r, f"{r['name']}: {r['myPrice']}p ×{r['quantity']} → {price}p ×{qty}",
+                    platinum=price, quantity=qty)
+
+    def action_hide(self):
+        r = self.current()
+        if r and not self.busy:
+            show = not r.get("visible", True)
+            self.change(r, f"{r['name']}: {'shown' if show else 'hidden'}", visible=show)
+
+    @work(exclusive=True, thread=True)
+    def change(self, r, what, **fields):
+        self.busy = True
+        try:
+            listing.edit_order(r["id"], **fields)
+            note = f"[#3ddc84]✓ {what}[/]"
+            err = None
+            if fields.get("visible") is not False:  # posting / showing: be in game for buyers
+                note += f"  [#8a93a6]{go_ingame()}[/]"
+        except Exception as e:
+            err = str(e) or type(e).__name__
+            note = f"[#ff6b6b]✗ {what}: {err}[/]"
+        listing.log({"name": r["name"], "order": {"edit": r["id"], **fields}}, err)
+        self.busy, self.note = False, note
+        self.load()
+
+    def action_close(self):
+        if self.query_one("#edit-form").display:
+            self.close_form()
+            self.note = ""
+            self.draw()
+        else:
+            self.dismiss()
+
+    # ---- reprice undercut -------------------------------------------------
     def action_reprice(self):
         todo = [r for r in self.rows if r["status"] == "undercut"]
         if self.busy or not todo:
@@ -748,10 +856,10 @@ class WatchScreen(ModalScreen):
                 results.append(f"[#ff6b6b]✗ {r['name']}: {err}[/]")
             listing.log({"name": r["name"], "order": {"reprice": r["id"], "platinum": price}}, err)
             time.sleep(0.4)
-        self.busy = False
-        body = self.query_one("#review-body", Static)
-        self.app.call_from_thread(body.update, markup("\n".join(
-            ["[b #e8eefc]Repriced[/]", ""] + results + ["", "[b]r[/] refresh · [b]esc[/] close"])))
+        if any("✓" in x for x in results):
+            results.append(f"[#8a93a6]{go_ingame()}[/]")
+        self.busy, self.note = False, "\n".join(results)
+        self.load()
 
 
 class PlatScout(App):

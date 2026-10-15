@@ -168,6 +168,7 @@ def watch():
         else:
             status = "undercut"
         rows.append({"id": o["id"], "name": name, "rank": o.get("rank"), "subtype": o.get("subtype"),
+                     "visible": o.get("visible", True),
                      "quantity": o.get("quantity"), "myPrice": o["platinum"], "lowestOther": lowest,
                      "undercutBy": o["platinum"] - lowest if status == "undercut" else 0,
                      "status": status, "slug": item.get("slug")})
@@ -182,6 +183,13 @@ def reprice(row, mode="match"):
 
 def apply_reprice(row, price):
     return call("PATCH", f"/order/{row['id']}", {"platinum": int(price)})
+
+
+def edit_order(order_id, platinum=None, quantity=None, visible=None):
+    """Change price, quantity and/or visibility of one of your orders."""
+    body = {k: v for k, v in (("platinum", platinum), ("quantity", quantity), ("visible", visible))
+            if v is not None}
+    return call("PATCH", f"/order/{order_id}", body)
 
 
 def close_order(order_id, quantity):

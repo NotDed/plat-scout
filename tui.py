@@ -32,7 +32,7 @@ RANKINGS = {  # key -> (file, score field, label)
 }
 # tabs with a single ranking of their own, made by extras.py
 SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
-           "mastery": ("mastery-candidates.json", "unmastered prime sets, cheapest to finish first")}
+           "mastery": ("mastery-candidates.json", "unmastered prime sets, lowest true cost per MR point")}
 TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics"),
         ("6", "mastery")]
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
@@ -43,7 +43,7 @@ COLUMNS = {  # header row per tab; the 6th column's field differs
     "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
     "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
     "relics": ("#", "Relic", "Total", "Sell", "Buy", "Crack", "/day", "Own", "Best action"),
-    "mastery": ("#", "Set", "MR pts", "Cost", "Your parts", "Full set", "/day", "Parts", "What to do"),
+    "mastery": ("#", "Set", "MR pts", "True cost", "Cash", "Full set", "/day", "Parts", "What to do"),
 }
 NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing")
 
@@ -418,9 +418,10 @@ class PlatScout(App):
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")
         elif self.kind == "mastery":
             pts = sum(c["masteryPoints"] for c in self.rows)
-            cost = sum(c["lowestPrice"] or 0 for c in self.rows)
-            lines.append(f"[b #3ddc84]▲ {pts:,} mastery points[/] [#8a93a6]from {len(self.rows)} sets"
-                         f" for ~{cost:,}p of missing parts[/]")
+            cash = sum(c.get("cash") or 0 for c in self.rows)
+            true = sum(c.get("trueCost") or 0 for c in self.rows)
+            lines.append(f"[b #3ddc84]▲ {pts:,} mastery points[/] [#8a93a6]from {len(self.rows)} sets:"
+                         f" ~{cash:,}p to spend, ~{true:,}p true cost[/]")
         elif self.kind == "sets":
             done = sum(1 for c in self.rows if c.get("complete"))
             lines.append(f"[b #3ddc84]▲ {done}[/] [#8a93a6]complete set(s) ready to sell[/]")
@@ -453,8 +454,8 @@ class PlatScout(App):
         if "affinityNeeded" in c:
             extra += (f"\n[#8a93a6]affinity[/]            {c['affinity']:,} / {c['affinityNeeded']:,}"
                       f"\n[#8a93a6]mastery points[/]      [b #3ddc84]+{c['masteryPoints']:,}[/]"
-                      f"\n[#5b6680]cost = missing parts · your parts = plat you give up ·"
-                      f" full set = buying it whole[/]")
+                      f"\n[#5b6680]true cost = plat you end up without vs selling instead ·"
+                      f" cash = plat you spend · full set = buying it whole[/]")
         if c.get("buyDemand"):
             extra += f"\n[#8a93a6]buyers want now[/]     [#c39bff]{c['buyDemand']}[/]"
         if "sellableIn7Days" in c and "potentialPlat" not in c:

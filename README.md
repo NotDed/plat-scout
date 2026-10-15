@@ -78,7 +78,7 @@ plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 | File | What |
 |---|---|
 | `set-candidates.json` | prime sets you own parts of: what's missing, its cost, and the gain vs selling parts |
-| `mastery-candidates.json` | prime sets you own parts of but haven't mastered (from your mastery history), cheapest to finish first, with the mastery points each gives |
+| `mastery-candidates.json` | prime sets you own parts of but haven't mastered (from your mastery history), ranked by true cost per mastery point: the cash you spend plus the plat you'd have made selling the set or parts instead |
 | `relic-candidates.json` | per relic: sell price vs expected crack value at each refinement, best action |
 
 Every price comes with the best online **buy order** too: what someone will pay

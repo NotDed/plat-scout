@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import webbrowser
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from rich.text import Text
@@ -137,6 +138,46 @@ TITLE = """[b #9fd8ff]█▀█ █   ▄▀█ ▀█▀[/]   [b #3ddc84]█▀
 def markup(s):
     """Rich markup -> Text, so Textual keeps the spacing exactly."""
     return Text.from_markup(s, overflow="crop")
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def worth_history():
+    """kind -> [(time, worth), ...] from data/history.jsonl, oldest first."""
+    out = {}
+    try:
+        for line in (DATA / "history.jsonl").read_text().splitlines():
+            try:
+                h = json.loads(line)
+            except ValueError:
+                continue
+            out.setdefault(h["kind"], []).append((datetime.fromisoformat(h["time"]), h["worth"]))
+    except OSError:
+        pass
+    return out
+
+
+def worth_line(kind):
+    """'worth ▂▃▅▇ 6,429p (+6% / 7d) · all tabs 14,820p', or '' with no history."""
+    hist = worth_history()
+    points = hist.get(kind, [])
+    total = sum(p[-1][1] for p in hist.values() if p)
+    if not points:
+        return f"[#5b6680]worth: no scans recorded yet · all tabs {total:,}p[/]" if total else ""
+    values = [w for _, w in points[-12:]]
+    lo, hi = min(values), max(values)
+    spark = "".join(SPARK[0 if hi == lo else round((v - lo) / (hi - lo) * 7)] for v in values)
+    latest_time, latest = points[-1]
+    week_ago = [w for t, w in points if t <= latest_time - timedelta(days=7)]
+    base = week_ago[-1] if week_ago else points[0][1]
+    change = ""
+    if base and len(points) > 1:
+        pct = (latest / base - 1) * 100
+        color = "#3ddc84" if pct >= 0 else "#ff6b6b"
+        change = f" [{color}]({pct:+.0f}% / {'7d' if week_ago else 'since first scan'})[/]"
+    return (f"[#8a93a6]sellable now[/] [#9fd8ff]{spark}[/] [b]{latest:,}p[/]{change}"
+            f" [#5b6680]· all tabs {total:,}p[/]")
 
 
 TREND_STYLE = {"rising": ("↑", "#3ddc84"), "falling": ("↓", "#ff6b6b"), "stable": ("→", "#8a93a6")}
@@ -541,6 +582,9 @@ class PlatScout(App):
                  + ("  [#e3c75b]r[/] [#5b6680]reset[/]" if self.sort_keys or not self.rank_desc else "")
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
+        worth = worth_line(self.kind) if self.kind not in SPECIAL else ""
+        if worth:
+            lines.append(worth)
         if self.kind == "relics" and self.ranking == "crack":
             total = sum(c["score"] for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")

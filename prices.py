@@ -338,6 +338,28 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
         "candidates": ducat_candidates(results)})
 
 
+def sell_now_worth(results):
+    """Plat your spare copies would bring this week, selling as they are
+    (no ranking up or refining): expected price x copies the market takes."""
+    total = 0
+    for r in results:
+        for p, copies in ((r["rank0"], r["ownedRank0"]),
+                          (r["maxRankPrice"], r["ownedMax"] if r["maxRank"] else 0)):
+            price = expected_price(p)
+            if price and copies:
+                can = sellable_copies(p.get("tradesPerDay", 0), p.get("buyDemand", 0),
+                                      r.get("bulk", False))
+                total += price * min(copies, can)
+    return round(total)
+
+
+def record_worth(out_dir, kind, results):
+    """Append one point to history.jsonl (next to the data) for the worth sparkline."""
+    with open(out_dir / "history.jsonl", "a") as f:
+        f.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "kind": kind, "worth": sell_now_worth(results)}) + "\n")
+
+
 def owned_copies(path):
     """Spare copies per item and rank. Equipped copies don't count: they're in use."""
     owned = {}
@@ -463,6 +485,7 @@ def run(mods_path, all_sellers=False, from_prices=False):
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)
     print()
 
+    record_worth(out_dir, mods_path.stem, results)
     results.sort(key=lambda r: -(r["maxRankPrice"]["lowest"] or r["rank0"]["lowest"] or 0))
     write_json(out_dir / f"{prices_name}.json", results)
     with open(out_dir / f"{prices_name}.csv", "w", newline="") as f:

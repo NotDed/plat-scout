@@ -252,6 +252,9 @@ class PlatScout(App):
     """
     BINDINGS = [
         *[Binding(key, f"kind('{kind}')", kind.title(), show=False) for key, kind in TABS],
+        # priority: the table would otherwise use left/right to scroll sideways
+        Binding("left", "step_tab(-1)", "Prev tab", show=False, priority=True),
+        Binding("right", "step_tab(1)", "Next tab", show=False, priority=True),
         Binding("v", "next_ranking", "Ranking"),
         Binding("c", "next_sort", "Sort"),
         Binding("C", "flip_sort", "Reverse sort", show=False),
@@ -513,6 +516,16 @@ class PlatScout(App):
             self.query_one(DataTable).focus()
 
     # ---- actions ----------------------------------------------------------
+    def action_step_tab(self, step):
+        kinds = [k for _, k in TABS]
+        self.action_kind(kinds[(kinds.index(self.kind) + step) % len(kinds)])
+
+    def check_action(self, action, parameters):
+        # while typing in a text box, left/right move the text cursor instead
+        if action == "step_tab" and (isinstance(self.focused, Input) or self.screen is not self.screen_stack[0]):
+            return False
+        return True
+
     def rank_order(self):
         return RELIC_RANK_ORDER if self.kind == "relics" else RANK_ORDER
 

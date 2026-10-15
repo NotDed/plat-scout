@@ -82,7 +82,10 @@ plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 | `relic-candidates.json` | per relic: sell price vs expected crack value at each refinement, best action |
 
 Every price comes with the best online **buy order** too: what someone will pay
-you right now.
+you right now. "Avg" is the *typical* asking price (median of the 5 cheapest
+online sellers) and the detail panel adds what it actually **sold for** over the
+last 90 days (median of real trades), so one wishful 300p listing on a
+low-demand item can't inflate either.
 
 `--all-sellers` on `prices`/`run` counts offline sellers too (default: only
 online/in-game).

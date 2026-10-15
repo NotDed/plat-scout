@@ -221,7 +221,7 @@ def relics():
     for n, slug in enumerate(slugs, 1):
         progress(n, len(slugs), slug.replace("_", " "), started)
         p = price(slug)
-        value[slug] = p["lowest"] if p["lowest"] is not None else sold_price(days_for(slug), None)
+        value[slug] = p["lowest"] if p["lowest"] is not None else sold_price(days_for(slug))
 
     rows = []
     for e in relics:

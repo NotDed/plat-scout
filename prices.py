@@ -51,13 +51,22 @@ def get(path, base=API, key="data"):
     raise RuntimeError(f"giving up on {path}")
 
 
+TYPICAL_OF = 5  # "average" = median of this many cheapest sellers
+
+
 def stats(prices, buys=()):
-    """Sell-side summary plus the best buy order (instant-sale price)."""
+    """Sell-side summary plus the best buy order (instant-sale price).
+
+    "average" is the typical asking price: the median of the few cheapest
+    sellers. A plain mean is wrecked by one wishful 300p listing on a
+    low-demand item.
+    """
     best_buy = max(buys) if buys else None
     if not prices:
         return {"lowest": None, "average": None, "sellers": 0, "bestBuy": best_buy}
-    return {"lowest": min(prices),
-            "average": round(statistics.mean(prices), 1),
+    cheapest = sorted(prices)[:TYPICAL_OF]
+    return {"lowest": cheapest[0],
+            "average": round(statistics.median(cheapest), 1),
             "sellers": len(prices), "bestBuy": best_buy}
 
 
@@ -71,11 +80,21 @@ def closed_days(slug):
     return (data or {}).get("statistics_closed", {}).get("90days", [])
 
 
-def sold_price(days, subtype):
-    """Volume-weighted average price actually traded over 90 days, or None."""
-    rows = [d for d in days if d.get("subtype") == subtype and d.get("volume")]
-    total = sum(d["volume"] for d in rows)
-    return round(sum(d["avg_price"] * d["volume"] for d in rows) / total, 1) if total else None
+def sold_price(days, subtype=None, rank=None):
+    """Typical price actually traded over 90 days, or None: the median of each
+    day's median price, weighted by how many sold that day (odd days with one
+    trade at 48p or 1p barely move it)."""
+    rows = [d for d in days if d.get("volume")
+            and (subtype is None or d.get("subtype") == subtype)
+            and (rank is None or d.get("mod_rank", 0) == rank)]
+    if not rows:
+        return None
+    rows.sort(key=lambda d: d.get("median", d["avg_price"]))
+    half, seen = sum(d["volume"] for d in rows) / 2, 0
+    for d in rows:
+        seen += d["volume"]
+        if seen >= half:
+            return round(d.get("median", d["avg_price"]), 1)
 
 
 def trades_per_day(days, ranks, subtype=None):
@@ -159,6 +178,7 @@ def candidates_all(results):
                         "onlineSellers": p["sellers"], "yourCopies": copies,
                         "bestBuy": p.get("bestBuy"), "ducats": r.get("ducats", 0),
                         "bulk": r.get("bulk", False), "buyDemand": p.get("buyDemand", 0),
+                        "soldAvg": p.get("soldAvg"),
                         "score": round(p["lowest"] * p["tradesPerDay"], 1),
                         "url": f"https://warframe.market/items/{r['slug']}",
                         **({"refinements": refs} if refs else {})})
@@ -365,9 +385,11 @@ def run(mods_path, all_sellers=False, from_prices=False):
                         "isArcane": "arcane_enhancement" in item.get("tags", []),
                         "bulk": bool(item.get("bulkTradable")),
                         "ducats": item.get("ducats", 0),
-                        "rank0": {**stats(*r0), "tradesPerDay": volume[0], "buyDemand": demand(0)},
+                        "rank0": {**stats(*r0), "tradesPerDay": volume[0], "buyDemand": demand(0),
+                                  "soldAvg": sold_price(days, o["subtype"], 0)},
                         "maxRankPrice": {**stats(*rmax), "tradesPerDay": volume[max_rank],
-                                         "buyDemand": demand(max_rank)},
+                                         "buyDemand": demand(max_rank),
+                                         "soldAvg": sold_price(days, o["subtype"], max_rank)},
                         **({"subtype": o["subtype"], "refinements": refinements}
                            if refinements else {})})
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)

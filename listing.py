@@ -23,7 +23,7 @@ API = "https://api.warframe.market/v2"
 PRICING = {  # key -> label
     "match": "match lowest online",
     "undercut": "undercut lowest by 1p",
-    "average": "average online price",
+    "average": "typical price (lower of cheapest-5 average and 90-day sold price)",
 }
 # actions that can be listed as-is (everything else needs work first)
 SELLABLE = re.compile(r"^(sell( as rank 0| it|$| \()|sell at rank \d+|complete! sell as a set)")
@@ -114,8 +114,10 @@ def plan(rows, pricing="match"):
         low, avg = c.get("lowestPrice"), c.get("averagePrice")
         if "crackValue" in c:  # relic tab: averagePrice is crack value, not a price
             avg = None
+        sold = c.get("soldAvg")
+        typical = min(avg, sold) if avg and sold else (avg or sold)  # never list at a spike
         price = {"match": low, "undercut": (low - 1) if low else None,
-                 "average": round(avg) if avg else low}[pricing]
+                 "average": round(typical) if typical else low}[pricing]
         if not price or price < 1:
             plans.append({**entry, "skip": "no price"})
             continue

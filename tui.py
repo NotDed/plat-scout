@@ -603,7 +603,8 @@ class PlatScout(App):
             f"[#8a93a6]lowest online[/]       [b #9fd8ff]{plat(c.get('lowestPrice'))}[/]\n"
             f"[#8a93a6]best buy order[/]      [b #c39bff]{plat(c.get('bestBuy'))}[/]\n"
             + (f"[#8a93a6]crack value[/]         {plat(c.get('averagePrice'))}\n" if is_relic else
-               f"[#8a93a6]average online[/]      {plat(c.get('averagePrice'))}\n") +
+               f"[#8a93a6]typical (5 cheapest)[/] {plat(c.get('averagePrice'))}\n") +
+            + (f"[#8a93a6]sold for (90 days)[/]  {plat(c.get('soldAvg'))}\n" if not is_relic else "") +
             f"[#8a93a6]online sellers[/]      {c.get('onlineSellers', 0)}\n"
             f"[#8a93a6]trades per day[/]      {c.get('tradesPerDay', 0)}\n"
             f"[#8a93a6]your copies[/]         {c['yourCopies']}"

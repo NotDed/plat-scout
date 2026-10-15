@@ -121,6 +121,16 @@ def whisper(seller, entry):
     return f"/w {seller['name']} Hi! I want to buy: {what}. (warframe.market)"
 
 
+NO_ANSWER_MIN = 5  # minutes before a whispered seller counts as not answering
+
+
+def record(kind, entry):
+    """Append a purchase or sale to data/purchases.jsonl / data/sales.jsonl."""
+    DATA.mkdir(exist_ok=True)
+    with open(DATA / f"{kind}.jsonl", "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 # ---- clipboard ------------------------------------------------------------
 def copy(text):
     """Copy with the system clipboard tool; False if none worked (caller falls

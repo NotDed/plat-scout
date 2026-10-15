@@ -19,7 +19,9 @@ from textual.containers import Horizontal, Vertical
 from textual import work
 from textual.widgets import Button, DataTable, Footer, Input, ProgressBar, Static
 
+import alerts
 import buying
+import gamelog
 import listing
 
 REPO = Path(__file__).resolve().parent
@@ -452,6 +454,70 @@ class AddScreen(ModalScreen):
         self.dismiss({"item": i, "rank": rank, "subtype": sub, "qty": qty, "max": max_price})
 
 
+class CloseSoldScreen(ModalScreen):
+    """After a sale in game: close those copies on warframe.market? Only on y."""
+    CSS = ReviewScreen.CSS.replace("ReviewScreen", "CloseSoldScreen")
+    BINDINGS = [Binding("y", "close_orders", "Close them"), Binding("n", "dismiss", "Keep"),
+                Binding("escape", "dismiss", "Keep")]
+
+    def __init__(self, buyer, gave, plat):
+        super().__init__()
+        self.buyer, self.gave, self.plat, self.plans, self.busy = buyer, gave, plat, [], False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="review"):
+            yield Static(id="review-body")
+
+    def on_mount(self):
+        self.load()
+
+    @work(exclusive=True, thread=True)
+    def load(self):
+        try:
+            self.plans = listing.sold_plan(self.gave)
+            error = None
+        except Exception as e:
+            self.plans, error = [], str(e) or type(e).__name__
+        self.app.call_from_thread(self.draw, error)
+
+    def draw(self, error=None):
+        items = ", ".join(f"{name} ×{qty}" for name, qty in self.gave)
+        lines = [f"[b #3ddc84]Sold {items} to {self.buyer} for {self.plat}p[/]", ""]
+        if error:
+            lines.append(f"[#ff6b6b]{error}[/]")
+        for p in self.plans:
+            o = p["order"]
+            lines.append(f"close [b]{p['qty']}[/] of your listing [b]{p['item']}[/]"
+                         f" ({o.get('quantity')} listed at {o['platinum']}p)" if o
+                         else f"[#5b6680]{p['item']}: not listed on warframe.market[/]")
+        closable = [p for p in self.plans if p["order"]]
+        lines += ["", "[b #3ddc84]y[/] close them on warframe.market · [b]n[/] keep listed"
+                  if closable else "[b]esc[/] close"]
+        self.query_one("#review-body", Static).update(markup("\n".join(lines)))
+
+    def action_close_orders(self):
+        todo = [p for p in self.plans if p["order"]]
+        if todo and not self.busy:
+            self.busy = True
+            self.close_all(todo)
+
+    @work(exclusive=True, thread=True)
+    def close_all(self, todo):
+        lines = ["[b #e8eefc]warframe.market[/]", ""]
+        for p in todo:
+            try:
+                listing.close_order(p["order"]["id"], p["qty"])
+                lines.append(f"[#3ddc84]✓[/] closed {p['qty']} × {p['item']}")
+                err = None
+            except Exception as e:
+                err = str(e) or type(e).__name__
+                lines.append(f"[#ff6b6b]✗ {p['item']}: {err}[/]")
+            listing.log({"name": p["item"], "order": {"close": p["order"]["id"], "quantity": p["qty"]}}, err)
+            time.sleep(0.4)
+        lines += ["", "[b]esc[/] close"]
+        self.app.call_from_thread(self.query_one("#review-body", Static).update, markup("\n".join(lines)))
+
+
 class WatchScreen(ModalScreen):
     """Your warframe.market listings vs the cheapest other seller; reprice on y."""
     CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen")
@@ -592,6 +658,7 @@ class PlatScout(App):
         Binding("less_than_sign", "buy_prev", "Prev seller", show=False),
         Binding("b", "buy_bought", "Bought"),
         Binding("delete", "buy_remove", "Remove from cart"),
+        Binding("m", "toggle_mute", "Mute alerts", show=False),
         Binding("s", "scan", "Scan tab"),
         Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
@@ -610,6 +677,9 @@ class PlatScout(App):
         self.rank_desc = True  # direction of the ranking order when no sort keys
         self.buy_sellers = {}  # (slug, rank, subtype) -> sellers, best first
         self.buy_loading = False
+        self.game = None        # gamelog.LogWatcher while the game's log exists
+        self.whispers = []      # [(name, time)] of people who whispered you first, newest first
+        self.no_answer_alerted = set()
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -638,6 +708,8 @@ class PlatScout(App):
         self.load()
         self.query_one(DataTable).focus()  # otherwise the hidden search box grabs keys
         self.set_interval(3, self.reload_if_changed)  # follows a running scan
+        self.game = gamelog.LogWatcher()
+        self.set_interval(1.5, self.poll_game_log)  # whispers, invites, trades
 
     # ---- data -------------------------------------------------------------
     def path(self):
@@ -704,7 +776,17 @@ class PlatScout(App):
                                 "score": cur["price"] * e["qty"], "seller": cur["name"],
                                 "rep": cur["reputation"], "status": cur["status"],
                                 "sellerPos": f"{i + 1}/{len(ok)}", "whisper": buying.whisper(cur, e),
-                                "action": "Enter: copy whisper"})
+                                "action": "Enter: copy whisper", "state": "ready"})
+            who = e.get("whisperedTo")
+            if who:  # the game log says you whispered someone about this
+                mins = int((time.time() - e.get("whisperedAt", time.time())) // 60)
+                if e.get("answered"):
+                    row.update(action=f"{who} answered: accept the invite / trade", state="answered")
+                elif mins >= buying.NO_ANSWER_MIN:
+                    row.update(action=f"no answer from {who} in {mins} min: press > for the next",
+                               state="no-answer")
+                else:
+                    row.update(action=f"whispered {who} {mins}m ago, waiting…", state="waiting")
             rows.append(row)
         return {"candidates": rows, "progress": f"{len(cart)} item(s) in cart",
                 "updated": time.strftime("%H:%M:%S")}
@@ -738,6 +820,108 @@ class PlatScout(App):
         if self.kind == "buy":
             self.meta = self.buy_meta()
             self.refresh_view()
+
+    # ---- game log -----------------------------------------------------------
+    def poll_game_log(self):
+        try:
+            events = self.game.poll()
+        except Exception:
+            return
+        for e in events:
+            try:
+                self.on_game_event(e)
+            except Exception as err:  # a weird log line must never crash the TUI
+                self.notify(f"game log: {err}", severity="warning")
+        self.check_no_answer()
+
+    def game_alert(self, kind, title, body=""):
+        if not alerts.alert(kind, title, body) and not alerts.muted():
+            self.bell()  # no sound player: at least the terminal bell
+        self.notify(title + (f" — {body}" if body else ""), timeout=12)
+
+    def on_game_event(self, e):
+        kind, name, changed = e["kind"], e["name"], False
+        cart = buying.load_cart()
+        if kind == "whisper_sent":
+            m = re.search(r'I want to buy: (?:\d+ x )?"(.+?)"', e.get("text", ""))
+            for entry in cart:
+                if m and buying.item_label(entry).lower() == m[1].lower():
+                    entry.update(whisperedTo=name, whisperedAt=e["time"], answered=False)
+                    changed = True
+        elif kind in ("invite", "trade_request", "whisper_received"):
+            waiting = [x for x in cart if (x.get("whisperedTo") or "").lower() == (name or "").lower()
+                       and not x.get("answered")]
+            how = {"invite": "invited you", "trade_request": "wants to trade",
+                   "whisper_received": "whispered you"}[kind]
+            if waiting:
+                for x in waiting:
+                    x["answered"] = True
+                changed = True
+                self.game_alert("message", f"{name} answered", f"{how} — {waiting[0]['name']}")
+            elif kind == "whisper_received":
+                self.whispers = [(name, e["time"])] + [w for w in self.whispers if w[0] != name][:2]
+                self.game_alert("message", f"{name} whispered you", "probably about one of your listings")
+            elif kind == "trade_request":
+                self.game_alert("message", f"{name} wants to trade with you")
+        elif kind == "trade_done" and e.get("offer"):
+            offer = e["offer"]
+            paid, got = gamelog.platinum(offer["offered"]), gamelog.goods(offer["received"])
+            earned, gave = gamelog.platinum(offer["received"]), gamelog.goods(offer["offered"])
+            if got:  # bought something: tick it off the cart
+                bought = []
+                for item, qty in got:
+                    for x in cart:
+                        if x["qty"] > 0 and x["name"].lower() == item.lower():
+                            take = min(qty, x["qty"])
+                            x["qty"] -= take
+                            for k in ("whisperedTo", "whisperedAt", "answered"):
+                                x.pop(k, None)
+                            x["sellerIndex"] = 0
+                            bought.append(f"{item} ×{take}")
+                            changed = True
+                            break
+                cart = [x for x in cart if x["qty"] > 0]
+                buying.record("purchases", {"time": e["time"], "from": name, "paid": paid, "items": got})
+                self.game_alert("done", f"bought {', '.join(bought) or ', '.join(i for i, _ in got)}"
+                                        f" from {name}", f"{paid}p")
+            if gave and earned:  # sold something: offer to close the listing
+                buying.record("sales", {"time": e["time"], "to": name, "earned": earned, "items": gave})
+                self.game_alert("done", f"sold {', '.join(f'{i} ×{q}' for i, q in gave)} to {name}",
+                                f"{earned}p")
+                if listing.load_token():
+                    self.push_screen(CloseSoldScreen(name, gave, earned))
+        if changed:
+            buying.save_cart(cart)
+            self.load_if_buy()
+        if kind in ("whisper_received",):
+            self.draw_headline()
+
+    def check_no_answer(self):
+        now = time.time()
+        for x in buying.load_cart():
+            who, since = x.get("whisperedTo"), x.get("whisperedAt")
+            if not who or x.get("answered") or not since:
+                continue
+            key = (x["slug"], who, since)
+            if now - since >= buying.NO_ANSWER_MIN * 60 and key not in self.no_answer_alerted:
+                self.no_answer_alerted.add(key)
+                self.game_alert("bell", f"{who} hasn't answered",
+                                f"{x['name']}: press > for the next seller")
+                self.load_if_buy()
+
+    def action_toggle_mute(self):
+        alerts.set_muted(not alerts.muted())
+        self.notify("alerts muted" if alerts.muted() else "alerts on")
+        self.draw_headline()
+
+    def game_line(self):
+        """'🔔 m · game log: watching · 💬 Gomhera 2m ago'"""
+        bell = "🔕 muted" if alerts.muted() else "🔔"
+        log = "game log: watching" if self.game and self.game.exists() else "game log not found"
+        now = time.time()
+        chats = " · ".join(f"💬 {n} {int((now - t) // 60)}m ago" for n, t in self.whispers)
+        return (f"[#8a93a6]{bell} [#e3c75b]m[/] · {log}[/]"
+                + (f"  [b #c39bff]{chats}[/]" if chats else ""))
 
     def current_buy_row(self):
         table = self.query_one(DataTable)
@@ -777,6 +961,8 @@ class PlatScout(App):
 
         def move(cart, e):
             e["sellerIndex"] = (row["index"] + step) % len(row["sellers"])
+            for k in ("whisperedTo", "whisperedAt", "answered"):
+                e.pop(k, None)
         self.edit_cart(row, move)
 
     def action_buy_next(self):
@@ -791,6 +977,8 @@ class PlatScout(App):
         def bought(cart, e):
             e["qty"] -= 1
             e["sellerIndex"] = 0
+            for k in ("whisperedTo", "whisperedAt", "answered"):
+                e.pop(k, None)
             if e["qty"] <= 0:
                 cart.remove(e)
         self.edit_cart(row, bought)
@@ -892,6 +1080,10 @@ class PlatScout(App):
         if f == "name":
             return Text(c["name"], style="bold #e8eefc")
         if f == "action":
+            if c.get("buyRow"):
+                style = {"answered": "bold #3ddc84", "waiting": "#e3c75b", "no-answer": "bold #ff9f5a",
+                         "ready": "#3ddc84"}.get(c.get("state"), "#8a93a6")
+                return Text(c["action"], style=style)
             return Text(c["action"], style="#ff9f5a" if c["action"].startswith(NEEDS_WORK)
                         else "#3ddc84")
         if f == "trend":
@@ -981,7 +1173,8 @@ class PlatScout(App):
                       f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]for {len(self.rows)} item(s) at the current sellers[/]"),
                      "[#e3c75b]a[/] add · [#e3c75b]Enter[/] copy whisper · [#e3c75b]>[/] next seller"
                      " · [#e3c75b]<[/] previous · [#e3c75b]b[/] bought · [#e3c75b]Del[/] remove"
-                     " · [#e3c75b]s[/] refresh sellers"]
+                     " · [#e3c75b]s[/] refresh sellers",
+                     self.game_line()]
             self.query_one("#headline", Static).update(markup("\n".join(lines)))
             return
         if not self.meta:
@@ -997,6 +1190,7 @@ class PlatScout(App):
         worth = worth_line(self.kind) if self.kind not in SPECIAL else ""
         if worth:
             lines.append(worth)
+        lines.append(self.game_line())
         if self.kind == "relics" and self.ranking == "crack":
             total = sum(c["score"] for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")

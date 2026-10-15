@@ -13,4 +13,4 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["cli", "extract", "extras", "fetch_inventory", "buying", "listing", "planner", "prices", "tui"]
+py-modules = ["cli", "extract", "extras", "fetch_inventory", "alerts", "buying", "gamelog", "listing", "planner", "prices", "tui"]

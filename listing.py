@@ -184,6 +184,26 @@ def apply_reprice(row, price):
     return call("PATCH", f"/order/{row['id']}", {"platinum": int(price)})
 
 
+def close_order(order_id, quantity):
+    """Mark copies of a listing as sold; closing the last copy removes the order."""
+    return call("POST", f"/order/{order_id}/close", {"quantity": int(quantity)})
+
+
+def sold_plan(given):
+    """Items you just traded away -> your matching sell listings, if any."""
+    by_id = {i["id"]: i for i in extract.load_market().values()}
+    orders = [o for o in my_orders() if o.get("type") == "sell"]
+    plans = []
+    for item, qty in given:
+        same = [o for o in orders
+                if by_id.get(o["itemId"], {}).get("i18n", {}).get("en", {}).get("name", "").lower()
+                == item.lower()]
+        order = same[0] if same else None
+        plans.append({"item": item, "qty": min(qty, order.get("quantity", qty)) if order else qty,
+                      "order": order})
+    return plans
+
+
 def log(p, error=None):
     """Append one line per post attempt to data/listing.log."""
     with open(DATA / "listing.log", "a") as f:

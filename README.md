@@ -37,7 +37,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `m` mute alerts, `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout plan` | day-by-day trade plan (see below), no new price scan |
 | `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
@@ -88,6 +88,27 @@ refinement, cheapest first, in-game before online, then by reputation:
 
 The clipboard uses `wl-copy` (Wayland), `xclip`/`xsel` (X11), or your
 terminal's clipboard as a fallback.
+
+## Game log: whispers, invites, trades (+ sound)
+
+While the TUI is open it follows Warframe's `EE.log` (read-only; set
+`PLAT_SCOUT_EE_LOG` if yours isn't in the default Proton location) and reacts:
+
+- **You whisper a seller** from the BUY tab → that row shows "whispered X, waiting…"
+- **The seller answers** (invites you, asks to trade, or whispers you) → sound +
+  desktop notification, row says "answered: accept the invite / trade"
+- **No answer in 5 minutes** → bell, row says "press > for the next seller"
+- **Trade successful** (you paid platinum for a cart item) → it's ticked off the
+  cart automatically and recorded in `data/purchases.jsonl`
+- **Someone whispers you first** → sound + notification, and `💬 name` in the
+  header (likely a buyer from your listings)
+- **You sold something** in a trade → sound, recorded in `data/sales.jsonl`, and
+  a prompt to close those copies of your warframe.market listing (`y` closes,
+  `n` keeps them listed)
+
+Sounds play with `pw-play`/`paplay` (freedesktop sound theme), notifications use
+`notify-send`; `m` mutes / unmutes. The game doesn't log the *text* of whispers
+you receive, only that a conversation started.
 
 ## Trade planner (`plat-scout plan`)
 

@@ -85,11 +85,16 @@ def cmd_top(a):
         return
     w = max(len(c["name"]) for c in rows)
     dash = lambda v: "-" if v is None else v
-    print(f"{'#':>3}  {'name':<{w}}  {'score':>8}  {'price':>5}  {'buy':>5}  {'avg':>6}  {'/day':>6}  {'own':>5}  action")
+    def trend(c):
+        t = c.get("trend") or {}
+        if not t.get("signal"):
+            return "-"
+        return {"rising": "+", "falling": "-", "stable": "~"}[t["signal"]] + f"{abs(t['pricePct'])}%"
+    print(f"{'#':>3}  {'name':<{w}}  {'score':>8}  {'price':>5}  {'buy':>5}  {'avg':>6}  {'/day':>6}  {'trend':>6}  {'own':>5}  action")
     for i, c in enumerate(rows, 1):
         print(f"{i:>3}  {c['name']:<{w}}  {c[field]:>8}  {dash(c.get('lowestPrice')):>5}  "
               f"{dash(c.get('bestBuy')):>5}  {dash(c.get('averagePrice')):>6}  "
-              f"{c.get('tradesPerDay', 0):>6}  {c.get('yourCopies', ''):>5}  {c['action']}")
+              f"{c.get('tradesPerDay', 0):>6}  {trend(c):>6}  {c.get('yourCopies', ''):>5}  {c['action']}")
 
 
 def cmd_tui(a):

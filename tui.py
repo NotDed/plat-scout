@@ -41,13 +41,14 @@ TEXT_FIELDS = ("name", "action")  # sort A→Z first; numbers sort high→low fi
 COLUMNS = {  # per tab layout: (header, field); "score" = the ranking's own score field
     "default": [("#", "#"), ("Name", "name"), ("Score", "score"), ("Potential", "potential"),
                 ("Price", "lowestPrice"), ("Buy", "bestBuy"), ("Avg", "averagePrice"),
-                ("/day", "tradesPerDay"), ("Own", "yourCopies"), ("Action", "action")],
+                ("/day", "tradesPerDay"), ("Trend", "trend"), ("Own", "yourCopies"),
+                ("Action", "action")],
     "sets": [("#", "#"), ("Set", "name"), ("Gain", "score"), ("Set", "lowestPrice"),
              ("Buy", "bestBuy"), ("Missing", "missingCost"), ("/day", "tradesPerDay"),
-             ("Parts", "yourCopies"), ("Action", "action")],
+             ("Trend", "trend"), ("Parts", "yourCopies"), ("Action", "action")],
     "relics": [("#", "#"), ("Relic", "name"), ("Potential", "score"), ("Sell", "lowestPrice"),
                ("Buy", "bestBuy"), ("Crack", "averagePrice"), ("/day", "tradesPerDay"),
-               ("Own", "yourCopies"), ("Best action", "action")],
+               ("Trend", "trend"), ("Own", "yourCopies"), ("Best action", "action")],
 }
 PLAT_FIELDS = {"potential", "lowestPrice", "bestBuy", "averagePrice", "missingCost"}
 FIELD_STYLE = {"potential": "bold #8fe3b0", "lowestPrice": "#9fd8ff", "bestBuy": "#c39bff",
@@ -136,6 +137,17 @@ TITLE = """[b #9fd8ff]█▀█ █   ▄▀█ ▀█▀[/]   [b #3ddc84]█▀
 def markup(s):
     """Rich markup -> Text, so Textual keeps the spacing exactly."""
     return Text.from_markup(s, overflow="crop")
+
+
+TREND_STYLE = {"rising": ("↑", "#3ddc84"), "falling": ("↓", "#ff6b6b"), "stable": ("→", "#8a93a6")}
+
+
+def trend_text(t):
+    """↑12% / ↓20% / →3% for a trend dict; '-' when there isn't enough data."""
+    if not t or not t.get("signal"):
+        return Text("-", style="#5b6680", justify="right")
+    arrow, color = TREND_STYLE[t["signal"]]
+    return Text(f"{arrow}{abs(t['pricePct'])}%", style=color, justify="right")
 
 
 class ReviewScreen(ModalScreen):
@@ -419,7 +431,7 @@ class PlatScout(App):
         one, otherwise lowest price x copies the market takes in a week."""
         if "potentialPlat" in c:
             return c["potentialPlat"]
-        price, copies = c.get("lowestPrice"), c.get("yourCopies")
+        price, copies = c.get("expectedPrice", c.get("lowestPrice")), c.get("yourCopies")
         if price is None or not isinstance(copies, (int, float)):
             return None
         sellable = c.get("tradesPerDay", 0) * WEEK
@@ -428,6 +440,8 @@ class PlatScout(App):
         return round(price * min(copies, sellable))
 
     def value(self, c, f):
+        if f == "trend":  # sorts by the price change
+            return (c.get("trend") or {}).get("pricePct") if (c.get("trend") or {}).get("signal") else None
         if f == "score":
             return c.get(self.field())
         if f == "potential":
@@ -445,6 +459,8 @@ class PlatScout(App):
         if f == "action":
             return Text(c["action"], style="#ff9f5a" if c["action"].startswith(NEEDS_WORK)
                         else "#3ddc84")
+        if f == "trend":
+            return trend_text(c.get("trend"))
         v = self.value(c, f)
         if f == "score":
             heat = (v or 0) / top
@@ -544,6 +560,7 @@ class PlatScout(App):
         if not c:
             box.update(markup("[#5b6680]nothing to show[/]"))
             return
+        plat = lambda v: f"{v}p" if v is not None else "-"
         extra = ""
         if "potentialPlat" in c:
             extra = (f"\n[#8a93a6]sellable in 7 days[/]  {c['sellableIn7Days']}"
@@ -557,6 +574,16 @@ class PlatScout(App):
                     low = "~" + low  # no one online: price from past sales
                 avg = f"{p['average']}p" if p["average"] else "-"
                 extra += f"\n[#8a93a6]{sub:<12}[/] {low:>6} {avg:>6} {p['tradesPerDay']:>6}"
+        t = c.get("trend") or {}
+        if t.get("price90"):
+            arrow = {"rising": "↑", "falling": "↓", "stable": "→"}.get(t.get("signal"), "")
+            pct = f" ({arrow}{abs(t['pricePct'])}%)" if t.get("signal") else " (few trades this week)"
+            vol = (f" · volume {'↑' if t['volumePct'] > 0 else '↓'}{abs(t['volumePct'])}%"
+                   if t.get("volumePct") is not None and t.get("signal") else "")
+            extra += (f"\n[#8a93a6]last 7 vs 90 days[/]   {plat(t.get('price7'))} vs"
+                      f" {plat(t['price90'])}{pct}{vol}")
+        if c.get("vaulted"):
+            extra += "\n[#e3c75b]vaulted[/] [#8a93a6]· prices tend to rise while vaulted, consider holding[/]"
         if c.get("buyDemand"):
             extra += f"\n[#8a93a6]buyers want now[/]     [#c39bff]{c['buyDemand']}[/]"
         if "sellableIn7Days" in c and "potentialPlat" not in c:
@@ -579,13 +606,16 @@ class PlatScout(App):
             for d in c.get("topDrops", []):
                 low = f"{d['price']}p" if d["price"] is not None else "-"
                 extra += f"\n{d['name'][:22]:<22} {d['chance']:>5}% {low:>5}"
-        plat = lambda v: f"{v}p" if v is not None else "-"
         is_relic = "crackValue" in c
         lines = [
             f"[b #e8eefc]{c['name']}[/]",
             f"[#ff9f5a]{c['action']}[/]",
             "",
             f"[#8a93a6]lowest online[/]       [b #9fd8ff]{plat(c.get('lowestPrice'))}[/]",
+            *([f"[#8a93a6]expected to sell at[/] [b #3ddc84]{plat(c['expectedPrice'])}[/]"
+               f" [#5b6680](it actually trades lower)[/]"]
+              if c.get("expectedPrice") is not None and c.get("lowestPrice") is not None
+              and c["expectedPrice"] < c["lowestPrice"] else []),
             f"[#8a93a6]best buy order[/]      [b #c39bff]{plat(c.get('bestBuy'))}[/]",
         ]
         if is_relic:

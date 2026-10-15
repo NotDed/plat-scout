@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 import extract
-from prices import (DELAY, REFINE_TRACES, closed_days, get, progress, sellable_copies,
-                    sold_price, stats, trades_per_day, write_json)
+from prices import (DELAY, REFINE_TRACES, closed_days, expected_price, get, progress,
+                    sellable_copies, sold_price, stats, trades_per_day, trend, write_json)
 
 DATA = Path(__file__).resolve().parent / "data"
 SUFFIX = {"intact": "Bronze", "exceptional": "Silver", "flawless": "Gold", "radiant": "Platinum"}
@@ -85,7 +85,11 @@ def sets():
         name = root["i18n"]["en"]["name"]
         progress(n, len(defs), name, started)
         sp = price(root["slug"])
+        set_days = days_for(root["slug"])
+        sp["lowest"] = expected_price({**sp, "soldAvg": sold_price(set_days),
+                                       "tradesPerDay": trades_per_day(set_days, {0})[0]})
         volume = trades_per_day(days_for(root["slug"]), {0})[0]
+        set_trend = trend(days_for(root["slug"]))
         part_rows, missing_cost, owned_value, have_n, need_n = [], 0, 0, 0, 0
         for m in members:
             qty, have = m.get("quantityInSet", 1), owned.get(m["gameRef"], 0)
@@ -115,6 +119,7 @@ def sets():
                      "onlineSellers": sp["sellers"], "yourCopies": f"{have_n}/{need_n}",
                      "missingCost": missing_cost, "ownedPartsValue": owned_value,
                      "ducats": root.get("ducats", 0), "parts": part_rows,
+                     "trend": set_trend, "vaulted": bool(root.get("vaulted")),
                      "url": f"https://warframe.market/items/{root['slug']}"})
         rows.sort(key=lambda r: (not r["complete"], -r["score"]))
         save("set-candidates.json",
@@ -157,7 +162,9 @@ def relics():
     for n, slug in enumerate(slugs, 1):
         progress(n, len(slugs), slug.replace("_", " "), started)
         p = price(slug)
-        value[slug] = p["lowest"] if p["lowest"] is not None else sold_price(days_for(slug))
+        days = days_for(slug)  # what drops actually sell for, not just the cheapest ask
+        value[slug] = expected_price({**p, "soldAvg": sold_price(days),
+                                      "tradesPerDay": trades_per_day(days, {0})[0]})
 
     rows = []
     for e in relics:
@@ -174,7 +181,7 @@ def relics():
                     top.append({"name": d["item"]["name"], "chance": d["chance"], "price": v})
             ev[sub] = round(total, 1)
         own_sell = sell.get((slug, cur)) or price(slug, cur)
-        sell_price = own_sell.get("lowest")
+        sell_price = expected_price(own_sell)
 
         options = [(sell_price or 0, f"sell it ({sell_price}p)" if sell_price else None),
                    (ev[cur], f"crack it (expected {ev[cur]}p)")]
@@ -198,6 +205,7 @@ def relics():
                      "tradesPerDay": own_sell.get("tradesPerDay", 0),
                      "onlineSellers": own_sell.get("sellers", 0), "yourCopies": e["count"],
                      "refinement": cur, "crackValue": ev, "topDrops": top[:4],
+                     "trend": own_sell.get("trend"), "vaulted": bool(market[e["uniqueName"]].get("vaulted")),
                      "url": f"https://warframe.market/items/{slug}"})
     rows.sort(key=lambda r: -r["score"])
     save("relic-candidates.json", "best of sell / crack / refine & crack, x your copies",

@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 API = "https://api.warframe.market/v2"
@@ -80,13 +81,19 @@ def closed_days(slug):
     return (data or {}).get("statistics_closed", {}).get("90days", [])
 
 
-def sold_price(days, subtype=None, rank=None):
+def trade_days(days, subtype=None, rank=None, since=None):
+    """Daily closed-trade rows for one subtype / rank, optionally from a date on."""
+    return [d for d in days if d.get("volume")
+            and (subtype is None or d.get("subtype") == subtype)
+            and (rank is None or d.get("mod_rank", 0) == rank)
+            and (since is None or datetime.fromisoformat(d["datetime"]) >= since)]
+
+
+def sold_price(days, subtype=None, rank=None, since=None):
     """Typical price actually traded over 90 days, or None: the median of each
     day's median price, weighted by how many sold that day (odd days with one
     trade at 48p or 1p barely move it)."""
-    rows = [d for d in days if d.get("volume")
-            and (subtype is None or d.get("subtype") == subtype)
-            and (rank is None or d.get("mod_rank", 0) == rank)]
+    rows = trade_days(days, subtype, rank, since)
     if not rows:
         return None
     rows.sort(key=lambda d: d.get("median", d["avg_price"]))
@@ -95,6 +102,29 @@ def sold_price(days, subtype=None, rank=None):
         seen += d["volume"]
         if seen >= half:
             return round(d.get("median", d["avg_price"]), 1)
+
+
+TREND_DAYS = 7
+TREND_MOVE = 15      # % change in price that counts as rising / falling
+TREND_MIN_TRADES = 3  # fewer trades than this in the last week = not enough data
+
+
+def trend(days, subtype=None, rank=None):
+    """Last week vs the whole 90 days: price and volume change, and a signal."""
+    since = datetime.now(timezone.utc) - timedelta(days=TREND_DAYS)
+    week = trade_days(days, subtype, rank, since)
+    all_rows = trade_days(days, subtype, rank)
+    price7, price90 = sold_price(week), sold_price(all_rows)
+    vol7 = sum(d["volume"] for d in week) / TREND_DAYS
+    vol90 = sum(d["volume"] for d in all_rows) / 90
+    pct = round((price7 / price90 - 1) * 100) if price7 and price90 else None
+    vpct = round((vol7 / vol90 - 1) * 100) if vol90 else None
+    enough = sum(d["volume"] for d in week) >= TREND_MIN_TRADES and pct is not None
+    signal = None
+    if enough:
+        signal = "rising" if pct >= TREND_MOVE else "falling" if pct <= -TREND_MOVE else "stable"
+    return {"price7": price7, "price90": price90, "pricePct": pct,
+            "vol7": round(vol7, 2), "vol90": round(vol90, 2), "volumePct": vpct, "signal": signal}
 
 
 def trades_per_day(days, ranks, subtype=None):
@@ -144,6 +174,15 @@ def candidates(results):
     return candidates_all(results)[:TOP]
 
 
+def expected_price(p):
+    """What a copy will realistically sell for: the cheapest ask, unless the item
+    actually trades for less (relics list at 30p but sell at ~2p in bulk)."""
+    low, sold = p.get("lowest"), p.get("soldAvg")
+    if sold is not None and p.get("tradesPerDay", 0) >= MIN_TRADES:
+        return round(min(low, sold) if low is not None else sold, 1)
+    return low
+
+
 def candidates_all(results):
     out = []
     for r in results:
@@ -151,7 +190,8 @@ def candidates_all(results):
         options = []
         if r["ownedRank0"]:
             options.append(("sell as rank 0" if r["maxRank"] else "sell", a, r["ownedRank0"]))
-            if r["maxRank"] and b["lowest"] and a["lowest"] and b["lowest"] > a["lowest"]:
+            if r["maxRank"] and expected_price(b) and expected_price(a) \
+                    and expected_price(b) > expected_price(a):
                 if r.get("isArcane"):
                     need = arcane_copies_for(r["maxRank"])
                     if r["ownedRank0"] // need:
@@ -167,19 +207,23 @@ def candidates_all(results):
             # relics: is refining before selling worth the Void Traces?
             now = REFINE_TRACES[r["subtype"]]
             for sub, p in refs.items():
-                if REFINE_TRACES[sub] > now and p["lowest"] and (not a["lowest"] or p["lowest"] > a["lowest"]):
+                if REFINE_TRACES[sub] > now and expected_price(p) \
+                        and (not expected_price(a) or expected_price(p) > expected_price(a)):
                     options.append((f"refine to {sub} ({REFINE_TRACES[sub] - now} traces), then sell",
                                     p, r["ownedRank0"]))
         for action, p, copies in options:
-            if not p["lowest"] or p["lowest"] < MIN_PRICE or p["tradesPerDay"] < MIN_TRADES:
+            exp = expected_price(p)
+            if not exp or exp < MIN_PRICE or p["tradesPerDay"] < MIN_TRADES:
                 continue
             out.append({"name": r["name"], "action": action, "lowestPrice": p["lowest"],
+                        "expectedPrice": exp,
                         "averagePrice": p["average"], "tradesPerDay": p["tradesPerDay"],
                         "onlineSellers": p["sellers"], "yourCopies": copies,
                         "bestBuy": p.get("bestBuy"), "ducats": r.get("ducats", 0),
                         "bulk": r.get("bulk", False), "buyDemand": p.get("buyDemand", 0),
-                        "soldAvg": p.get("soldAvg"),
-                        "score": round(p["lowest"] * p["tradesPerDay"], 1),
+                        "soldAvg": p.get("soldAvg"), "trend": p.get("trend"),
+                        "vaulted": r.get("vaulted", False),
+                        "score": round(exp * p["tradesPerDay"], 1),
                         "url": f"https://warframe.market/items/{r['slug']}",
                         **({"refinements": refs} if refs else {})})
     out.sort(key=lambda c: -c["score"])
@@ -216,7 +260,7 @@ def owned_candidates(results):
         sellable = min(c["yourCopies"], sellable_copies(c["tradesPerDay"], c.get("buyDemand", 0),
                                                         c.get("bulk", False)))
         out.append({**c, "sellableIn7Days": round(sellable, 1),
-                    "potentialPlat": round(c["lowestPrice"] * sellable)})
+                    "potentialPlat": round(c["expectedPrice"] * sellable)})
     out.sort(key=lambda c: -c["potentialPlat"])
     return out[:TOP]
 
@@ -236,7 +280,7 @@ def ducat_candidates(results):
     """Prime parts worth more as ducats (Baro Ki'Teer) than as plat."""
     out = []
     for r in results:
-        ducats, price = r.get("ducats", 0), r["rank0"]["lowest"]
+        ducats, price = r.get("ducats", 0), expected_price(r["rank0"])
         if not ducats or not r["ownedRank0"]:
             continue
         ratio = ducats / price if price else None
@@ -250,6 +294,7 @@ def ducat_candidates(results):
                     "tradesPerDay": r["rank0"]["tradesPerDay"],
                     "onlineSellers": r["rank0"]["sellers"], "yourCopies": r["ownedRank0"],
                     "ducats": ducats, "score": ducats * r["ownedRank0"],
+                    "trend": r["rank0"].get("trend"), "vaulted": r.get("vaulted", False),
                     "url": f"https://warframe.market/items/{r['slug']}"})
     out.sort(key=lambda c: -c["score"])
     return out
@@ -259,11 +304,11 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     write_json(out_dir / f"{prefix}sell-candidates.json", {
         "updated": now, "progress": progress_text,
-        "score": "lowest online price x trades per day (last 90 days)",
+        "score": "expected price x trades per day (last 90 days)",
         "candidates": candidates(results)})
     write_json(out_dir / f"{prefix}sell-candidates-owned.json", {
         "updated": now, "progress": progress_text,
-        "score": "lowest online price x copies you own, capped at what sells in 7 days",
+        "score": "expected price x copies you own, capped at what sells in 7 days",
         "candidates": owned_candidates(results)})
     write_json(out_dir / f"{prefix}sell-candidates-volume.json", {
         "updated": now, "progress": progress_text,
@@ -372,6 +417,7 @@ def run(mods_path, all_sellers=False, from_prices=False):
                                                 if x["type"] == "buy" and x.get("subtype") == sub],
                                                st["lowest"])
                 st["soldAvg"] = sold_price(days, sub)
+                st["trend"] = trend(days, sub)
                 if st["lowest"] is None and st["soldAvg"]:
                     # nobody online selling this level: fall back to what it sold for
                     st["lowest"] = st["average"] = round(st["soldAvg"])
@@ -385,11 +431,14 @@ def run(mods_path, all_sellers=False, from_prices=False):
                         "isArcane": "arcane_enhancement" in item.get("tags", []),
                         "bulk": bool(item.get("bulkTradable")),
                         "ducats": item.get("ducats", 0),
+                        "vaulted": bool(item.get("vaulted")),
                         "rank0": {**stats(*r0), "tradesPerDay": volume[0], "buyDemand": demand(0),
-                                  "soldAvg": sold_price(days, o["subtype"], 0)},
+                                  "soldAvg": sold_price(days, o["subtype"], 0),
+                                  "trend": trend(days, o["subtype"], 0)},
                         "maxRankPrice": {**stats(*rmax), "tradesPerDay": volume[max_rank],
                                          "buyDemand": demand(max_rank),
-                                         "soldAvg": sold_price(days, o["subtype"], max_rank)},
+                                         "soldAvg": sold_price(days, o["subtype"], max_rank),
+                                         "trend": trend(days, o["subtype"], max_rank)},
                         **({"subtype": o["subtype"], "refinements": refinements}
                            if refinements else {})})
         write_candidates(out_dir, results, f"{n}/{len(todo)} checked", prefix)

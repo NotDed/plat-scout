@@ -22,7 +22,8 @@ This adds a `plat-scout` command. Data stays in this repo's `data/` folder.
 plat-scout tui                 # interactive browser: u = update inventory, s = scan tab, S = scan all
 plat-scout sets                # prime sets you own parts of: complete them or not?
 plat-scout relics              # crack value of each relic vs selling it (after prices relics)
-plat-scout run                 # fetch + extract + prices, everything (~18 min)
+plat-scout plan                # today's best trades within your MR trade limit and credit tax
+plat-scout run                 # fetch + extract + prices + sets + relics + plan, everything (~30 min)
 plat-scout top                 # best 15 mods to sell, by plat from your copies
 plat-scout top --quick         # only ones you can sell right now (no ranking up)
 plat-scout top arcanes --by market -n 30
@@ -36,8 +37,9 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`5` or `←`/`→` tabs (mods, arcanes, items, sets, relics), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
-| `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, trades), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout plan` | day-by-day trade plan (see TRADES below), no new price scan |
+| `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
 [warframe-api-helper](https://github.com/Sainan/warframe-api-helper), rewritten
@@ -62,12 +64,42 @@ warframe.market in your browser, F12 → Application/Storage → Cookies →
 `data/wfm-token` (git-ignored, readable only by you). Your account must be
 verified on warframe.market to create orders.
 
+Press `w` for **My listings**: each of your sell orders vs the cheapest *other*
+online seller of the same item, rank and subtype. Undercut ones are flagged;
+`y` reprices them (match the cheapest, or `p` for 1p under). Nothing changes
+without `y`.
+
+## Trade planner (TRADES tab)
+
+Warframe allows as many trades per day as your Mastery Rank, and every item
+traded costs credits. `plat-scout plan` (or `s` on the TRADES tab) takes every
+sell-now option from the saved scans plus complete prime sets, treats each
+buyer as one trade (bulk items like relics: up to 6 copies per trade), fetches
+each item's credit tax once (cached in `data/cache/trading-tax.json`), and
+fills today's remaining trades first, then MR trades per day, best plat per
+trade first. Trades costing more than 2,000 credits per plat are skipped, as is
+anything beyond your credits. The header shows today's plat, tax and how many
+days it takes to sell everything.
+
+## Signals
+
+- **Expected price**: scores and Potential use the cheapest ask *unless the item
+  actually trades for less* (90-day median of real trades). Relics, for example,
+  are often listed at 10-30p but trade at 1.5-3p in bulk.
+- **Trend**: last 7 days vs 90 days of trades (↑ rising / → stable / ↓ falling,
+  ±15 %); `-` when fewer than 3 trades this week. Vaulted items say so, since
+  they tend to rise while vaulted.
+- **Endo**: "rank to max" rows show the endo (rarity base 10/20/30/40 ×
+  (2^max − 1)), credits, and plat gained per 1,000 endo.
+- **Worth over time**: every scan logs each tab's sell-now worth to
+  `data/history.jsonl`; the header shows a sparkline and the change vs a week ago.
+
 ## Output (in `data/`)
 
 | File | Ranked by |
 |---|---|
-| `sell-candidates.json` | lowest online price × trades per day |
-| `sell-candidates-owned.json` | lowest price × your copies, capped at what sells in 7 days (bulk items: also what online buyers want right now) |
+| `sell-candidates.json` | expected price × trades per day |
+| `sell-candidates-owned.json` | expected price × your copies, capped at what sells in 7 days (bulk items: also what online buyers want right now) |
 | `sell-candidates-volume.json` | your copies × trades per day (price ignored) |
 | `mod-prices.json` / `.csv` | every tradable mod: lowest/average price and trades/day at rank 0 and max rank |
 
@@ -79,6 +111,8 @@ plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 |---|---|
 | `set-candidates.json` | prime sets you own parts of: what's missing, its cost, and the gain vs selling parts |
 | `relic-candidates.json` | per relic: sell price vs expected crack value at each refinement, best action |
+| `trade-plan.json` | the TRADES tab: day, trades, tax and plat per item |
+| `history.jsonl` | sell-now worth per tab after every scan |
 
 Every price comes with the best online **buy order** too: what someone will pay
 you right now. "Avg" is the *typical* asking price (median of the 5 cheapest
@@ -97,7 +131,7 @@ online/in-game).
   sells for more, you get a "refine to X (N traces), then sell" option. When no
   one is online selling a level, its price comes from the last 90 days of sales
   (shown with `~` in the TUI).
-- Relic crack value = Σ drop chance × lowest online price of the drop (solo
+- Relic crack value = Σ drop chance × expected price of the drop (solo
   run, drop tables from WFCD). Refining is only suggested when it adds ≥5p.
 - Rivens are skipped: they trade on the separate riven auction market.
 - Built frames and weapons are skipped: only loose parts and blueprints can be

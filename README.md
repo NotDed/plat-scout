@@ -100,7 +100,10 @@ online/in-game).
 - Rivens are skipped: they trade on the separate riven auction market.
 - Built frames and weapons are skipped: only loose parts and blueprints can be
   traded. Resources (Ferrite, Rubedo...) aren't tradable either.
-- "Already maxed" copies may be the ones you have equipped.
+- Equipped mods and arcanes are never counted as sellable: extract.py reads
+  every build (frames, weapons, companions, archwings…) and only spare copies
+  show up. After re-equipping, `plat-scout extract && plat-scout rank`
+  refreshes the rankings without a new scan.
 - `data/` is git-ignored: `inventory.json` contains your account ID.
 - Reading the session token from game memory is a grey area under DE's terms
   of service. Use at your own risk.

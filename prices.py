@@ -141,7 +141,8 @@ def candidates_all(results):
                 else:
                     options.append((f"rank to {r['maxRank']} first, then sell", b, r["ownedRank0"]))
         if r["ownedMax"] and r["maxRank"]:
-            options.append((f"sell at rank {r['maxRank']} (already maxed)", b, r["ownedMax"]))
+            spare = " (spare copy)" if r.get("equipped") else ""
+            options.append((f"sell at rank {r['maxRank']} (already maxed){spare}", b, r["ownedMax"]))
         refs = r.get("refinements")
         if refs and r["ownedRank0"] and r.get("subtype") in refs:
             # relics: is refining before selling worth the Void Traces?
@@ -254,6 +255,36 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
         "candidates": ducat_candidates(results)})
 
 
+def owned_copies(path):
+    """Spare copies per item and rank. Equipped copies don't count: they're in use."""
+    owned = {}
+    for m in json.load(open(path)):
+        if "riven" in m:
+            continue  # rivens are traded on the separate riven auction market
+        # relics: one entry per refinement, priced separately
+        o = owned.setdefault((m["uniqueName"], m.get("subtype")),
+                             {"name": m["name"], "subtype": m.get("subtype"),
+                              "owned": 0, "ranks": {}, "equipped": 0})
+        if m.get("equipped"):
+            o["equipped"] += m["count"]
+            continue
+        o["owned"] += m["count"]
+        o["ranks"][m["rank"]] = o["ranks"].get(m["rank"], 0) + m["count"]
+    return owned
+
+
+def refresh_counts(results, owned):
+    """Re-apply spare-copy counts to saved results (matched by name + subtype)."""
+    by_name = {(o["name"], o["subtype"]): o for o in owned.values()}
+    for r in results:
+        o = by_name.get((r["name"], r.get("subtype")))
+        if not o:
+            continue
+        r["owned"], r["equipped"] = o["owned"], o["equipped"]
+        r["ownedRank0"] = o["ranks"].get(0, 0)
+        r["ownedMax"] = o["ranks"].get(r["maxRank"], 0) if r["maxRank"] else 0
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     run(Path(args[0]) if args else Path(__file__).resolve().parent / "data" / "mods.json",
@@ -268,23 +299,17 @@ def run(mods_path, all_sellers=False, from_prices=False):
     prefix = "" if mods_path.stem == "mods" else mods_path.stem.rstrip("s") + "-"
     prices_name = "mod-prices" if not prefix else f"{prefix}prices"
 
+    owned = owned_copies(mods_path)
+
     if from_prices:
-        # re-rank from a finished mod-prices.json without calling the API
+        # re-rank from a finished mod-prices.json without calling the API, with
+        # copy counts refreshed from the source file (e.g. after equipping mods)
         results = json.load(open(out_dir / f"{prices_name}.json"))
+        refresh_counts(results, owned)
         write_candidates(out_dir, results, f"{len(results)}/{len(results)} checked", prefix)
         print(f"rewrote the sell-candidates*.json files in {out_dir}")
         return
 
-    owned = {}
-    for m in json.load(open(mods_path)):
-        if "riven" in m:
-            continue  # rivens are traded on the separate riven auction market
-        # relics: one entry per refinement, priced separately
-        o = owned.setdefault((m["uniqueName"], m.get("subtype")),
-                             {"name": m["name"], "subtype": m.get("subtype"),
-                              "owned": 0, "ranks": {}})
-        o["owned"] += m["count"]
-        o["ranks"][m["rank"]] = o["ranks"].get(m["rank"], 0) + m["count"]
 
     market = {i["gameRef"]: i for i in get("/items") if i.get("gameRef")}
     todo = [(ref, o, market[ref]) for (ref, _), o in owned.items() if ref in market]
@@ -334,7 +359,7 @@ def run(mods_path, all_sellers=False, from_prices=False):
                 st["tradesPerDay"] = trades_per_day(days, {0}, sub)[0]
                 refinements[sub] = st
         results.append({"name": o["name"], "slug": item["slug"], "owned": o["owned"],
-                        "ownedRank0": o["ranks"].get(0, 0),
+                        "ownedRank0": o["ranks"].get(0, 0), "equipped": o["equipped"],
                         "ownedMax": o["ranks"].get(max_rank, 0) if max_rank else 0,
                         "maxRank": max_rank,
                         "isArcane": "arcane_enhancement" in item.get("tags", []),

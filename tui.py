@@ -161,8 +161,8 @@ class ReviewScreen(ModalScreen):
             o, old = p["order"], p.get("existing")
             what = (f"[#e3c75b]update {old['platinum']}p -> {o['platinum']}p[/]" if old
                     else "[#3ddc84]new listing[/]")
-            if "already maxed" in p["action"]:
-                what += " [#ff9f5a](equipped? check first)[/]"
+            if "already maxed" in p["action"] and "spare copy" not in p["action"]:
+                what += " [#ff9f5a](not equipped; still yours to keep?)[/]"
             sub = o.get("subtype")
             name = p["name"] + (f" ({sub})" if sub and sub not in ("intact", "regular")
                                 and sub not in p["name"] else "")

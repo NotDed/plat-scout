@@ -85,9 +85,31 @@ def fingerprint(entry):
         return {}
 
 
+def equipped_ids(inv):
+    """ItemIds of mod/arcane copies slotted in any build (frames, weapons, pets...)."""
+    used = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "Upgrades" and isinstance(v, list):
+                    used.update(u for u in v if isinstance(u, str))
+                else:
+                    walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for key, value in inv.items():
+        if key not in ("Upgrades", "RawUpgrades"):  # those are the mods themselves
+            walk(value)
+    return used
+
+
 def main():
     inv = json.load(open(DATA / "inventory.json"))
     entries = inv.get("RawUpgrades", []) + inv.get("Upgrades", [])
+    in_use = equipped_ids(inv)
     mods_db, arcanes_db = load_db("Mods"), load_db("Arcanes")
 
     mods, arcanes, unknown = [], [], set()
@@ -95,17 +117,20 @@ def main():
         t = x["ItemType"]
         fp = fingerprint(x)
         count = x.get("ItemCount", 1)
+        equipped = (x.get("ItemId") or {}).get("$oid") in in_use
         if t in arcanes_db:
             a = arcanes_db[t]
             arcanes.append({"name": a["name"], "type": a.get("type"), "rarity": a.get("rarity"),
                             "rank": fp.get("lvl", 0),
                             "maxRank": len(a["levelStats"]) - 1 if a.get("levelStats") else None,
-                            "count": count, "uniqueName": t})
+                            "count": count, "uniqueName": t,
+                            **({"equipped": True} if equipped else {})})
         elif t in mods_db and "Arcane" not in mods_db[t].get("type", ""):
             m = mods_db[t]
             e = {"name": m["name"], "type": m.get("type"), "rarity": m.get("rarity"),
                  "polarity": m.get("polarity"), "rank": fp.get("lvl", 0),
-                 "maxRank": m.get("fusionLimit"), "count": count, "uniqueName": t}
+                 "maxRank": m.get("fusionLimit"), "count": count, "uniqueName": t,
+                 **({"equipped": True} if equipped else {})}
             if "Randomized" in t and "UpgradeFingerprint" in x:
                 e["riven"] = fp
             mods.append(e)
@@ -118,7 +143,9 @@ def main():
     for name, items in (("mods", mods), ("arcanes", arcanes), ("items", items), ("relics", relics)):
         items.sort(key=lambda e: (e["name"], -e["rank"]))
         (DATA / f"{name}.json").write_text(json.dumps(items, indent=2, ensure_ascii=False))
-        print(f"{name}.json: {len(items)} entries, {sum(e['count'] for e in items)} copies")
+        used = sum(e["count"] for e in items if e.get("equipped"))
+        print(f"{name}.json: {len(items)} entries, {sum(e['count'] for e in items)} copies"
+              + (f" ({used} equipped)" if used else ""))
     if unknown:
         print(f"skipped {len(unknown)} items not in the database (usually removed mods)")
 

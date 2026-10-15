@@ -404,7 +404,9 @@ class PlatScout(App):
             table.clear()
             for col, label in zip(table.columns.values(), headers):
                 col.label = Text(label)
-        top = max((c[field] or 0 for c in self.rows), default=1) or 1
+        # % and colors are relative to the best row of the whole ranking, not just
+        # what's visible, so filtering or searching doesn't change the numbers
+        top = max((c.get(field) or 0 for c in self.meta.get("candidates", [])), default=1) or 1
         for i, c in enumerate(self.rows, 1):
             table.add_row(*(self.cell(c, f, field, top) for _, f in COLUMNS[layout]), key=str(i))
         self.draw_headline()

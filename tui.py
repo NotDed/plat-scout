@@ -67,6 +67,10 @@ def build_logo():
         plat = (ASSETS / "plat.txt").read_text(encoding="utf-8").splitlines()
     except OSError:
         plat = []
+    try:  # one color per character, sampled from assets/plat.png
+        colors = json.loads((ASSETS / "plat-colors.json").read_text())
+    except (OSError, ValueError):
+        colors = []
     plat_w = max((len(line) for line in plat), default=0)
     ox = max(plat_w - ARROW_OVERLAP, 0)  # arrow column offset
     oy = max(len(plat) - len(ARROW), 0)  # arrow sits at the bottom
@@ -77,7 +81,8 @@ def build_logo():
     cells = [[(" ", "")] * width for _ in range(height)]
     for y, line in enumerate(plat):
         for x, ch in enumerate(line):
-            cells[y][x] = (ch, SHADES.get(ch, ""))
+            sampled = colors[y][x] if y < len(colors) and x < len(colors[y]) else None
+            cells[y][x] = (ch, sampled or SHADES.get(ch, ""))
     for y, line in enumerate(ARROW):
         for x, ch in enumerate(line):
             if ch != " ":

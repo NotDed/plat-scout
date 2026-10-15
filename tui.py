@@ -452,6 +452,10 @@ class PlatScout(App):
         if f == "score":
             heat = (v or 0) / top
             color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
+            if self.layout() == "default":  # abstract score: show it relative to the best row
+                pct = heat * 100
+                label = f"{pct:.0f}%" if pct >= 1 or not v else "<1%"
+                return Text(label, style=f"bold {color}", justify="right")
             return Text(f"{v or 0:,}", style=f"bold {color}", justify="right")
         if f in PLAT_FIELDS:
             return Text(f"{v:,}p" if v is not None else "-", style=FIELD_STYLE.get(f, ""),

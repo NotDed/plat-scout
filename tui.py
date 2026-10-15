@@ -39,13 +39,25 @@ TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "r
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
 RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
                     ("volume", "volume")]
-TEXT_COLUMNS = (1, 8)  # name and action sort A→Z first; numbers high→low
-COLUMNS = {  # header row per tab; the 6th column's field differs
-    "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
-    "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
-    "relics": ("#", "Relic", "Total", "Sell", "Buy", "Crack", "/day", "Own", "Best action"),
-    "mastery": ("#", "Set", "MR pts", "True cost", "Cash", "Full set", "/day", "Parts", "What to do"),
+TEXT_FIELDS = ("name", "action")  # sort A→Z first; numbers sort high→low first
+COLUMNS = {  # per tab layout: (header, field); "score" = the ranking's own score field
+    "default": [("#", "#"), ("Name", "name"), ("Score", "score"), ("Potential", "potential"),
+                ("Price", "lowestPrice"), ("Buy", "bestBuy"), ("Avg", "averagePrice"),
+                ("/day", "tradesPerDay"), ("Own", "yourCopies"), ("Action", "action")],
+    "sets": [("#", "#"), ("Set", "name"), ("Gain", "score"), ("Set", "lowestPrice"),
+             ("Buy", "bestBuy"), ("Missing", "missingCost"), ("/day", "tradesPerDay"),
+             ("Parts", "yourCopies"), ("Action", "action")],
+    "relics": [("#", "#"), ("Relic", "name"), ("Potential", "score"), ("Sell", "lowestPrice"),
+               ("Buy", "bestBuy"), ("Crack", "averagePrice"), ("/day", "tradesPerDay"),
+               ("Own", "yourCopies"), ("Best action", "action")],
+    "mastery": [("#", "#"), ("Set", "name"), ("MR pts", "score"), ("True cost", "lowestPrice"),
+                ("Cash", "bestBuy"), ("Full set", "averagePrice"), ("/day", "tradesPerDay"),
+                ("Parts", "yourCopies"), ("What to do", "action")],
 }
+PLAT_FIELDS = {"potential", "lowestPrice", "bestBuy", "averagePrice", "missingCost"}
+FIELD_STYLE = {"potential": "bold #8fe3b0", "lowestPrice": "#9fd8ff", "bestBuy": "#c39bff",
+               "averagePrice": "#6f87a8", "missingCost": "#6f87a8"}
+WEEK = 7
 NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing")
 
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -370,47 +382,92 @@ class PlatScout(App):
     # ---- drawing ----------------------------------------------------------
     def refresh_view(self):
         field = self.field()
+        table = self.query_one(DataTable)
+        # remember which row the cursor is on and the scroll, to restore after redrawing
+        old_rows = getattr(self, "rows", [])
+        keep = None
+        if old_rows and 0 <= table.cursor_row < len(old_rows):
+            keep = (old_rows[table.cursor_row]["name"], old_rows[table.cursor_row]["action"])
+        scroll_y = table.scroll_y
+
         ranked = self.visible()
         self.rank_of = {id(c): n for n, c in enumerate(ranked, 1)}
         self.rows = self.sorted_rows(ranked)
-        table = self.query_one(DataTable)
         layout = self.layout()
         headers = self.headers(layout)
-        if self.columns_for != headers:
+        if self.columns_for != layout:  # different tab layout: rebuild the columns
             table.clear(columns=True)
-            table.add_columns(*headers)
-            self.columns_for = headers
-        else:
+            for i, label in enumerate(headers):
+                table.add_column(label, key=f"c{i}")
+            self.columns_for = layout
+        else:  # same columns: only relabel (sort markers) so widths and scroll stay put
             table.clear()
-        sixth = "missingCost" if self.kind == "sets" else "averagePrice"
-        plat = lambda v: f"{v}p" if v is not None else "-"
+            for col, label in zip(table.columns.values(), headers):
+                col.label = Text(label)
         top = max((c[field] or 0 for c in self.rows), default=1) or 1
         for i, c in enumerate(self.rows, 1):
-            heat = (c[field] or 0) / top
-            color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
-            action_color = "#ff9f5a" if c["action"].startswith(NEEDS_WORK) else "#3ddc84"
-            table.add_row(
-                Text("●" if (c["name"], c["action"]) in self.selected else str(self.rank_of[id(c)]),
-                     style="bold #3ddc84" if (c["name"], c["action"]) in self.selected
-                     else "#5b6680"),
-                Text(c["name"], style="bold #e8eefc"),
-                Text(f"{c[field] or 0:,}", style=f"bold {color}", justify="right"),
-                Text(plat(c.get("lowestPrice")), style="#9fd8ff", justify="right"),
-                Text(plat(c.get("bestBuy")), style="#c39bff", justify="right"),
-                Text(plat(c.get(sixth)), style="#6f87a8", justify="right"),
-                Text(f"{c.get('tradesPerDay', 0)}", justify="right"),
-                Text(f"{c.get('yourCopies', '')}", justify="right"),
-                Text(c["action"], style=action_color),
-                key=str(i))
+            table.add_row(*(self.cell(c, f, field, top) for _, f in COLUMNS[layout]), key=str(i))
         self.draw_headline()
-        self.draw_detail(self.rows[0] if self.rows else None)
+        index = next((i for i, c in enumerate(self.rows) if (c["name"], c["action"]) == keep), None)
+        if self.rows:
+            # same row still here (re-sort, reload): stay put; otherwise start at the top
+            table.scroll_to(y=scroll_y if index is not None else 0, animate=False)
+            table.move_cursor(row=index or 0, animate=False, scroll=True)
+        index = index or 0
+        self.draw_detail(self.rows[index] if self.rows else None)
+
+    @staticmethod
+    def potential(c):
+        """Plat from selling your copies: the owned ranking's number when there is
+        one, otherwise lowest price x copies the market takes in a week."""
+        if "potentialPlat" in c:
+            return c["potentialPlat"]
+        price, copies = c.get("lowestPrice"), c.get("yourCopies")
+        if price is None or not isinstance(copies, (int, float)):
+            return None
+        sellable = c.get("tradesPerDay", 0) * WEEK
+        if c.get("bulk"):
+            sellable = max(sellable, c.get("buyDemand", 0))
+        return round(price * min(copies, sellable))
+
+    def value(self, c, f):
+        if f == "score":
+            return c.get(self.field())
+        if f == "potential":
+            return self.potential(c)
+        return c.get(f)
+
+    def cell(self, c, f, score_field, top):
+        """One table cell for row c and field f."""
+        if f == "#":
+            sel = (c["name"], c["action"]) in self.selected
+            return Text("●" if sel else str(self.rank_of[id(c)]),
+                        style="bold #3ddc84" if sel else "#5b6680")
+        if f == "name":
+            return Text(c["name"], style="bold #e8eefc")
+        if f == "action":
+            return Text(c["action"], style="#ff9f5a" if c["action"].startswith(NEEDS_WORK)
+                        else "#3ddc84")
+        v = self.value(c, f)
+        if f == "score":
+            heat = (v or 0) / top
+            color = "#3ddc84" if heat > 0.5 else "#e3c75b" if heat > 0.15 else "#8a93a6"
+            return Text(f"{v or 0:,}", style=f"bold {color}", justify="right")
+        if f in PLAT_FIELDS:
+            return Text(f"{v:,}p" if v is not None else "-", style=FIELD_STYLE.get(f, ""),
+                        justify="right")
+        return Text("" if v is None else f"{v}", justify="right")
+
+    def columns(self):
+        return COLUMNS[self.layout()]
+
+    def is_text(self, col):
+        return self.columns()[col][1] in TEXT_FIELDS
 
     def sort_value(self, c, col):
         """Value of row c in table column col, for sorting."""
-        sixth = "missingCost" if self.kind == "sets" else "averagePrice"
-        field = [None, "name", self.field(), "lowestPrice", "bestBuy", sixth,
-                 "tradesPerDay", "yourCopies", "action"][col]
-        v = c.get(field)
+        field = self.columns()[col][1]
+        v = self.value(c, field)
         if isinstance(v, str) and "/" in v and field == "yourCopies":  # sets: "2/4"
             have, need = v.split("/")
             v = int(have) / int(need)
@@ -436,15 +493,17 @@ class PlatScout(App):
         return sorted(rows, key=functools.cmp_to_key(compare))
 
     def headers(self, layout):
-        """Column titles with sort markers, e.g. 'Price ↓1'."""
+        """Column titles with sort markers, e.g. 'Price ↓1'. Every title keeps 3
+        spare characters so adding a marker never changes column widths."""
         marks = {col: f" {'↓' if desc else '↑'}{n if len(self.sort_keys) > 1 else ''}"
                  for n, (col, desc) in enumerate(self.sort_keys, 1)}
-        return tuple(name + marks.get(i, "") for i, name in enumerate(COLUMNS[layout]))
+        return tuple(name + marks.get(i, "").ljust(3) if i else name
+                     for i, (name, _) in enumerate(COLUMNS[layout]))
 
     def sort_label(self):
         if not self.sort_keys:
             return "ranking order" + ("" if self.rank_desc else " (reversed)")
-        names = COLUMNS[self.layout()]
+        names = [name for name, _ in self.columns()]
         return " › ".join(f"{names[col]} {'↓' if desc else '↑'}" for col, desc in self.sort_keys)
 
     def draw_headline(self):
@@ -600,8 +659,9 @@ class PlatScout(App):
 
     def next_free_column(self, after=0):
         used = {col for col, _ in self.sort_keys}
-        for step in range(1, 9):
-            col = (after + step - 1) % 8 + 1  # columns 1..8 ("#" isn't sortable)
+        n = len(self.columns()) - 1  # "#" isn't sortable
+        for step in range(1, n + 1):
+            col = (after + step - 1) % n + 1
             if col not in used:
                 return col
         return None
@@ -616,7 +676,7 @@ class PlatScout(App):
         if nxt is None or nxt <= col:  # went past the last column: drop this level
             self.refresh_view()
             return
-        self.sort_keys.append((nxt, nxt not in TEXT_COLUMNS))
+        self.sort_keys.append((nxt, not self.is_text(nxt)))
         self.refresh_view()
 
     def action_flip_sort(self):
@@ -632,7 +692,7 @@ class PlatScout(App):
         """n: add another sort level on the first column not used yet."""
         col = self.next_free_column()
         if col is not None:
-            self.sort_keys.append((col, col not in TEXT_COLUMNS))
+            self.sort_keys.append((col, not self.is_text(col)))
         self.refresh_view()
 
     def action_reset_sort(self):
@@ -654,11 +714,11 @@ class PlatScout(App):
         else:
             levels = [c for c, _ in self.sort_keys]
             if col not in levels:
-                self.sort_keys.append((col, col not in TEXT_COLUMNS))
+                self.sort_keys.append((col, not self.is_text(col)))
             else:
                 i = levels.index(col)
                 desc = self.sort_keys[i][1]
-                if desc == (col not in TEXT_COLUMNS):  # still the starting direction: flip
+                if desc == (not self.is_text(col)):  # still the starting direction: flip
                     self.sort_keys[i] = (col, not desc)
                 else:
                     self.sort_keys.pop(i)

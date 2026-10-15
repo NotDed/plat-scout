@@ -289,6 +289,7 @@ class PlatScout(App):
         Binding("c", "next_sort", "Sort"),
         Binding("C", "flip_sort", "Reverse sort", show=False),
         Binding("n", "add_sort", "Add sort level", show=False),
+        Binding("r", "reset_sort", "Reset sort"),
         Binding("backspace", "pop_sort", "Remove sort level", show=False),
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
@@ -461,6 +462,7 @@ class PlatScout(App):
         lines = [TITLE, "", tabs,
                  (f"[#5b6680]ranked by[/] [b #e3c75b]{label}[/]" if special else ranks)
                  + f"   [#e3c75b]c[/] [#5b6680]sort:[/] [b #9fd8ff]{self.sort_label()}[/]"
+                 + ("  [#e3c75b]r[/] [#5b6680]reset[/]" if self.sort_keys or not self.rank_desc else "")
                  + ("   [b #3ddc84]● sell-now only[/]" if self.quick else ""),
                  status]
         if self.kind == "relics" and self.ranking == "crack":
@@ -631,6 +633,11 @@ class PlatScout(App):
         col = self.next_free_column()
         if col is not None:
             self.sort_keys.append((col, col not in TEXT_COLUMNS))
+        self.refresh_view()
+
+    def action_reset_sort(self):
+        """r: back to the ranking's own order."""
+        self.sort_keys, self.rank_desc = [], True
         self.refresh_view()
 
     def action_pop_sort(self):

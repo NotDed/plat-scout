@@ -36,7 +36,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, mastery), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, mastery), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as

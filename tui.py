@@ -60,18 +60,43 @@ ARROW_SHADES = ["#b8ffd6", "#7cf0ac", "#5ae896", "#3ddc84", "#2fb36b", "#26935a"
 ARROW_OVERLAP = 6  # columns of the arrow that sit on top of the plat
 
 
-def build_logo():
-    """The platinum artwork from assets/plat.txt with the green arrow
-    overlapping its bottom-right edge."""
+def plat_cells():
+    """The plat as rows of (char, style) cells.
+
+    Preferred: assets/plat-pixels.json (made from assets/plat.png), drawn with
+    half blocks so each cell holds two square pixels. Fallback: the shaded
+    ASCII art in assets/plat.txt.
+    """
+    try:
+        pixels = json.loads((ASSETS / "plat-pixels.json").read_text())
+    except (OSError, ValueError):
+        pixels = None
+    if pixels:
+        rows = []
+        for y in range(0, len(pixels) - 1, 2):
+            row = []
+            for top, bottom in zip(pixels[y], pixels[y + 1]):
+                if top and bottom:
+                    row.append(("▀", f"{top} on {bottom}"))
+                elif top:
+                    row.append(("▀", top))
+                elif bottom:
+                    row.append(("▄", bottom))
+                else:
+                    row.append((" ", ""))
+            rows.append(row)
+        return rows
     try:
         plat = (ASSETS / "plat.txt").read_text(encoding="utf-8").splitlines()
     except OSError:
-        plat = []
-    try:  # one color per character, sampled from assets/plat.png
-        colors = json.loads((ASSETS / "plat-colors.json").read_text())
-    except (OSError, ValueError):
-        colors = []
-    plat_w = max((len(line) for line in plat), default=0)
+        return []
+    return [[(ch, SHADES.get(ch, "")) for ch in line] for line in plat]
+
+
+def build_logo():
+    """The plat with the green arrow overlapping its bottom-right edge."""
+    plat = plat_cells()
+    plat_w = max((len(row) for row in plat), default=0)
     ox = max(plat_w - ARROW_OVERLAP, 0)  # arrow column offset
     oy = max(len(plat) - len(ARROW), 0)  # arrow sits at the bottom
     width = max(plat_w, ox + len(ARROW[0]))
@@ -79,11 +104,9 @@ def build_logo():
 
     # canvas of (char, style): plat first, then the arrow painted over it
     cells = [[(" ", "")] * width for _ in range(height)]
-    for y, line in enumerate(plat):
-        for x, ch in enumerate(line):
-            sampled = colors[y][x] if y < len(colors) and x < len(colors[y]) else None
-            # with sampled colors, solid blocks show them in full; shading chars dim them
-            cells[y][x] = ("█", sampled) if sampled else (ch, SHADES.get(ch, ""))
+    for y, row in enumerate(plat):
+        for x, cell in enumerate(row):
+            cells[y][x] = cell
     for y, line in enumerate(ARROW):
         for x, ch in enumerate(line):
             if ch != " ":

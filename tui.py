@@ -1,6 +1,7 @@
 """plat-scout TUI: browse the sell rankings, live-reloading while a scan runs."""
 
 import asyncio
+import functools
 import json
 import re
 import sys
@@ -38,7 +39,7 @@ TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "r
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
 RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
                     ("volume", "volume")]
-SORT_NONE = 0  # column index 0 ("#") = the ranking's own order
+TEXT_COLUMNS = (1, 8)  # name and action sort A→Z first; numbers high→low
 COLUMNS = {  # header row per tab; the 6th column's field differs
     "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
     "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
@@ -287,6 +288,8 @@ class PlatScout(App):
         Binding("v", "next_ranking", "Ranking"),
         Binding("c", "next_sort", "Sort"),
         Binding("C", "flip_sort", "Reverse sort", show=False),
+        Binding("n", "add_sort", "Add sort level", show=False),
+        Binding("backspace", "pop_sort", "Remove sort level", show=False),
         Binding("f", "toggle_quick", "Sell-now only"),
         Binding("slash", "search", "Search"),
         Binding("o", "open", "Open market"),
@@ -306,7 +309,8 @@ class PlatScout(App):
         self.rows, self.meta, self.mtime = [], {}, None
         self.proc = None  # running scan / fetch subprocess
         self.selected = set()  # (name, action) of rows marked with space
-        self.sort_col, self.sort_desc = SORT_NONE, True
+        self.sort_keys = []  # [(column index, descending)], first = primary
+        self.rank_desc = True  # direction of the ranking order when no sort keys
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -370,10 +374,11 @@ class PlatScout(App):
         self.rows = self.sorted_rows(ranked)
         table = self.query_one(DataTable)
         layout = self.layout()
-        if self.columns_for != layout:
+        headers = self.headers(layout)
+        if self.columns_for != headers:
             table.clear(columns=True)
-            table.add_columns(*COLUMNS[layout])
-            self.columns_for = layout
+            table.add_columns(*headers)
+            self.columns_for = headers
         else:
             table.clear()
         sixth = "missingCost" if self.kind == "sets" else "averagePrice"
@@ -411,22 +416,35 @@ class PlatScout(App):
         return v
 
     def sorted_rows(self, rows):
-        if self.sort_col == SORT_NONE:
-            return rows if self.sort_desc else rows[::-1]
-        present = [c for c in rows if self.sort_value(c, self.sort_col) is not None]
-        missing = [c for c in rows if self.sort_value(c, self.sort_col) is None]
-        present.sort(key=lambda c: (self.sort_value(c, self.sort_col).lower()
-                                    if isinstance(self.sort_value(c, self.sort_col), str)
-                                    else self.sort_value(c, self.sort_col)),
-                     reverse=self.sort_desc)
-        return present + missing  # rows without a value always go last
+        if not self.sort_keys:
+            return rows if self.rank_desc else rows[::-1]
+
+        def compare(a, b):
+            for col, desc in self.sort_keys:
+                va, vb = self.sort_value(a, col), self.sort_value(b, col)
+                if va is None or vb is None:  # rows without a value always go last
+                    if va is None and vb is None:
+                        continue
+                    return 1 if va is None else -1
+                if isinstance(va, str):
+                    va, vb = va.lower(), str(vb).lower()
+                if va != vb:
+                    return (-1 if va > vb else 1) if desc else (-1 if va < vb else 1)
+            return 0
+
+        return sorted(rows, key=functools.cmp_to_key(compare))
+
+    def headers(self, layout):
+        """Column titles with sort markers, e.g. 'Price ↓1'."""
+        marks = {col: f" {'↓' if desc else '↑'}{n if len(self.sort_keys) > 1 else ''}"
+                 for n, (col, desc) in enumerate(self.sort_keys, 1)}
+        return tuple(name + marks.get(i, "") for i, name in enumerate(COLUMNS[layout]))
 
     def sort_label(self):
-        layout = self.layout()
-        if self.sort_col == SORT_NONE:
-            return "ranking order" + ("" if self.sort_desc else " (reversed)")
-        name = COLUMNS[layout][self.sort_col]
-        return f"{name} {'↓' if self.sort_desc else '↑'}"
+        if not self.sort_keys:
+            return "ranking order" + ("" if self.rank_desc else " (reversed)")
+        names = COLUMNS[self.layout()]
+        return " › ".join(f"{names[col]} {'↓' if desc else '↑'}" for col, desc in self.sort_keys)
 
     def draw_headline(self):
         special = self.kind in SPECIAL
@@ -578,22 +596,65 @@ class PlatScout(App):
         keys = [k for k, _ in self.rank_order()]
         self.action_rank(keys[(keys.index(self.ranking) + 1) % len(keys)])
 
+    def next_free_column(self, after=0):
+        used = {col for col, _ in self.sort_keys}
+        for step in range(1, 9):
+            col = (after + step - 1) % 8 + 1  # columns 1..8 ("#" isn't sortable)
+            if col not in used:
+                return col
+        return None
+
     def action_next_sort(self):
-        self.sort_col = (self.sort_col + 1) % 9
-        self.sort_desc = self.sort_col not in (1, 8)  # text columns start A→Z
+        """c: move the last sort level to the next column (none -> start one)."""
+        if not self.sort_keys:
+            self.action_add_sort()
+            return
+        col, _ = self.sort_keys.pop()
+        nxt = self.next_free_column(col)
+        if nxt is None or nxt <= col:  # went past the last column: drop this level
+            self.refresh_view()
+            return
+        self.sort_keys.append((nxt, nxt not in TEXT_COLUMNS))
         self.refresh_view()
 
     def action_flip_sort(self):
-        self.sort_desc = not self.sort_desc
+        """C: flip the last sort level (or the ranking order)."""
+        if self.sort_keys:
+            col, desc = self.sort_keys[-1]
+            self.sort_keys[-1] = (col, not desc)
+        else:
+            self.rank_desc = not self.rank_desc
         self.refresh_view()
 
+    def action_add_sort(self):
+        """n: add another sort level on the first column not used yet."""
+        col = self.next_free_column()
+        if col is not None:
+            self.sort_keys.append((col, col not in TEXT_COLUMNS))
+        self.refresh_view()
+
+    def action_pop_sort(self):
+        """backspace: remove the last sort level."""
+        if self.sort_keys:
+            self.sort_keys.pop()
+            self.refresh_view()
+
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected):
-        # click a header: sort by it; click again: reverse
-        if event.column_index == self.sort_col:
-            self.sort_desc = not self.sort_desc
+        # click a header: add it as the next sort level; again: flip; a third time: remove
+        col = event.column_index
+        if col == 0:
+            self.sort_keys = []
         else:
-            self.sort_col = event.column_index
-            self.sort_desc = self.sort_col not in (1, 8)
+            levels = [c for c, _ in self.sort_keys]
+            if col not in levels:
+                self.sort_keys.append((col, col not in TEXT_COLUMNS))
+            else:
+                i = levels.index(col)
+                desc = self.sort_keys[i][1]
+                if desc == (col not in TEXT_COLUMNS):  # still the starting direction: flip
+                    self.sort_keys[i] = (col, not desc)
+                else:
+                    self.sort_keys.pop(i)
         self.refresh_view()
 
     def action_rank(self, ranking):

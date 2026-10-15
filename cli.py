@@ -103,6 +103,12 @@ def cmd_top(a):
               f"{c.get('tradesPerDay', 0):>6}  {trend(c):>6}  {c.get('yourCopies', ''):>5}  {c['action']}")
 
 
+def cmd_sound(a):
+    import alerts
+    path, times = alerts.sound_for(a.kind)
+    print(f"{a.kind}: {path.name} x{times}" + ("" if alerts.play(a.kind) else "  (could not play)"))
+
+
 def cmd_tui(a):
     import tui  # textual is only needed for this command
     tui.run()
@@ -160,6 +166,10 @@ def main():
     s.add_argument("-n", type=int, default=15, help="how many rows (default 15)")
     s.add_argument("--quick", action="store_true", help="hide options that need ranking up or fusing")
     s.set_defaults(func=cmd_top)
+
+    s = sub.add_parser("sound", help="play an alert sound: message (answered/whispered), done, bell")
+    s.add_argument("kind", nargs="?", default="message", choices=["message", "done", "bell"])
+    s.set_defaults(func=cmd_sound)
 
     s = sub.add_parser("tui", help="browse the rankings in an interactive terminal UI")
     s.set_defaults(func=cmd_tui)

@@ -106,8 +106,12 @@ While the TUI is open it follows Warframe's `EE.log` (read-only; set
   a prompt to close those copies of your warframe.market listing (`y` closes,
   `n` keeps them listed)
 
-Sounds play with `pw-play`/`paplay` (freedesktop sound theme), notifications use
-`notify-send`; `m` mutes / unmutes. The game doesn't log the *text* of whispers
+Sounds play with `pw-play`/`paplay`, notifications use `notify-send`; `m` mutes /
+unmutes. Defaults: an answer or a whisper rings `phone-incoming-call` twice, a
+finished trade plays `service-login`, no answer plays `dialog-warning` twice.
+Preview with `plat-scout sound message|done|bell`; change them in
+`data/settings.json`, e.g. `{"sounds": {"message": ["alarm-clock-elapsed.oga", 1]}}`
+(any name from `/usr/share/sounds/freedesktop/stereo/` or a full path). The game doesn't log the *text* of whispers
 you receive, only that a conversation started.
 
 ## Trade planner (`plat-scout plan`)

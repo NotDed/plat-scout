@@ -45,8 +45,9 @@ Step by step:
 [warframe-api-helper](https://github.com/Sainan/warframe-api-helper), rewritten
 in Python). If you get "permission denied", run it with `sudo` once.
 
-The ranking files are rewritten after every item during `prices`, so you can
-open them while the scan runs.
+A scan first deletes the previous results for what it scans (`S` and
+`plat-scout run`: every tab; `s`: that tab), so tables start empty and fill in
+live. Inventory, item lists, caches, the worth history and your token are kept.
 
 ## Listing on warframe.market
 

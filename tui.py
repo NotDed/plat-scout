@@ -973,18 +973,30 @@ class PlatScout(App):
             return DATA / "inventory.json"
         return DATA / ("items.json" if kind == "sets" else f"{kind}.json")
 
+    def clear_for(self, kinds):
+        """Old results go before a scan starts, so the tables fill in fresh."""
+        if self.proc and self.proc.returncode is None:
+            return False  # a scan is running: run_steps will say so
+        import prices
+        prices.clear_results(kinds, DATA)
+        self.load()
+        return True
+
     def action_scan(self):
         if not self.source(self.kind).exists():
             self.notify(f"{self.source(self.kind).name} not found. Press u to update your "
                         "inventory first.", severity="error")
             return
+        self.clear_for([self.kind])
         self.run_steps(self.scan_steps(self.kind))
 
     def action_scan_all(self):
-        steps = [step for _, k in TABS if self.source(k).exists() for step in self.scan_steps(k)]
+        kinds = [k for _, k in TABS if self.source(k).exists()]
+        steps = [step for k in kinds for step in self.scan_steps(k)]
         if not steps:
             self.notify("nothing to scan. Press u to update your inventory first.", severity="error")
             return
+        self.clear_for(kinds)
         self.run_steps(steps)
 
     def action_update_inventory(self):

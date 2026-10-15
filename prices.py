@@ -353,6 +353,30 @@ def sell_now_worth(results):
     return round(total)
 
 
+# result files each scan writes, per tab (inputs, caches, history and token are never touched)
+OUTPUTS = {
+    "mods": ["mod-prices.json", "mod-prices.csv", "sell-candidates*.json", "ducat-candidates.json"],
+    "arcanes": ["arcane-prices.*", "arcane-sell-candidates*.json", "arcane-ducat-candidates.json"],
+    "items": ["item-prices.*", "item-sell-candidates*.json", "item-ducat-candidates.json"],
+    "relics": ["relic-prices.*", "relic-sell-candidates*.json", "relic-ducat-candidates.json",
+               "relic-candidates.json"],
+    "sets": ["set-candidates.json"],
+    "trades": ["trade-plan.json"],
+}
+
+
+def clear_results(kinds, data_dir=None):
+    """Delete previous scan results so tables start empty; returns how many."""
+    data_dir = data_dir or Path(__file__).resolve().parent / "data"
+    removed = 0
+    for kind in kinds:
+        for pattern in OUTPUTS.get(kind, []):
+            for f in data_dir.glob(pattern):
+                f.unlink()
+                removed += 1
+    return removed
+
+
 def record_worth(out_dir, kind, results):
     """Append one point to history.jsonl (next to the data) for the worth sparkline."""
     with open(out_dir / "history.jsonl", "a") as f:

@@ -316,6 +316,96 @@ class ReviewScreen(ModalScreen):
                                   timeout=12)
 
 
+class WatchScreen(ModalScreen):
+    """Your warframe.market listings vs the cheapest other seller; reprice on y."""
+    CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen")
+    BINDINGS = [Binding("y", "reprice", "Reprice undercut"), Binding("p", "mode", "Match/undercut"),
+                Binding("r", "refresh", "Refresh"), Binding("escape", "dismiss", "Close")]
+    STATUS = {"cheapest": "#3ddc84", "undercut": "#ff6b6b", "only seller online": "#3ddc84",
+              "hidden": "#5b6680"}
+
+    def __init__(self):
+        super().__init__()
+        self.rows, self.mode, self.busy, self.error = [], "match", False, None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="review"):
+            yield Static(id="review-body")
+
+    def on_mount(self):
+        self.load()
+
+    @work(exclusive=True, thread=True)
+    def load(self):
+        body = self.query_one("#review-body", Static)
+        self.app.call_from_thread(body.update, markup("[#8a93a6]checking your listings…[/]"))
+        try:
+            self.rows, self.error = listing.watch(), None
+        except Exception as e:  # no token, expired token, network…
+            self.rows, self.error = [], str(e) or type(e).__name__
+        self.app.call_from_thread(self.draw)
+
+    def draw(self):
+        if self.error:
+            lines = [f"[#ff6b6b]{self.error}[/]",
+                     "[#8a93a6]log in first: select any row, press l and paste your JWT[/]"]
+        else:
+            undercut = [r for r in self.rows if r["status"] == "undercut"]
+            mode = "match the cheapest" if self.mode == "match" else "undercut by 1p"
+            lines = [f"[b #e8eefc]My listings[/]  [#8a93a6]{len(self.rows)} sell orders ·"
+                     f" {len(undercut)} undercut · reprice mode:[/] [b #e3c75b]{mode}[/]", "",
+                     f"[b #9fd8ff]{'item':<30} {'rank':>4} {'qty':>4} {'mine':>6} {'lowest':>7}  status[/]"]
+            for r in self.rows:
+                color = self.STATUS.get(r["status"], "")
+                low = f"{r['lowestOther']}p" if r["lowestOther"] is not None else "-"
+                what = r["status"]
+                if r["status"] == "undercut":
+                    what += f" by {r['undercutBy']}p → {listing.reprice(r, self.mode)}p"
+                lines.append(f"{r['name'][:30]:<30} {r['rank'] if r['rank'] is not None else '':>4}"
+                             f" {r['quantity'] or '':>4} {r['myPrice']:>5}p {low:>7}  [{color}]{what}[/]")
+            if not self.rows:
+                lines.append("[#5b6680]no sell orders on your account[/]")
+            lines += ["", (f"[b #3ddc84]y[/] reprice {len(undercut)} · " if undercut else "")
+                      + "[b]p[/] match/undercut · [b]r[/] refresh · [b]esc[/] close"]
+        self.query_one("#review-body", Static).update(markup("\n".join(lines)))
+
+    def action_mode(self):
+        self.mode = "undercut" if self.mode == "match" else "match"
+        self.draw()
+
+    def action_refresh(self):
+        if not self.busy:
+            self.load()
+
+    def action_reprice(self):
+        todo = [r for r in self.rows if r["status"] == "undercut"]
+        if self.busy or not todo:
+            if not todo:
+                self.notify("nothing undercut right now")
+            return
+        self.busy = True
+        self.reprice_all(todo)
+
+    @work(exclusive=True, thread=True)
+    def reprice_all(self, todo):
+        results = []
+        for r in todo:
+            price = listing.reprice(r, self.mode)
+            try:
+                listing.apply_reprice(r, price)
+                results.append(f"[#3ddc84]✓[/] {r['name']}: {r['myPrice']}p → {price}p")
+                err = None
+            except Exception as e:
+                err = str(e) or type(e).__name__
+                results.append(f"[#ff6b6b]✗ {r['name']}: {err}[/]")
+            listing.log({"name": r["name"], "order": {"reprice": r["id"], "platinum": price}}, err)
+            time.sleep(0.4)
+        self.busy = False
+        body = self.query_one("#review-body", Static)
+        self.app.call_from_thread(body.update, markup("\n".join(
+            ["[b #e8eefc]Repriced[/]", ""] + results + ["", "[b]r[/] refresh · [b]esc[/] close"])))
+
+
 class PlatScout(App):
     TITLE = "plat-scout"
     CSS = """
@@ -356,6 +446,7 @@ class PlatScout(App):
         Binding("o", "open", "Open market"),
         Binding("space", "toggle_select", "Select", show=False),
         Binding("l", "list_selected", "List on market"),
+        Binding("w", "watch", "My listings"),
         Binding("s", "scan", "Scan tab"),
         Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
@@ -834,6 +925,9 @@ class PlatScout(App):
             rows = [self.rows[table.cursor_row]]
         if rows:
             self.push_screen(ReviewScreen(rows), lambda _: self.reset_selection())
+
+    def action_watch(self):
+        self.push_screen(WatchScreen())
 
     def reset_selection(self):
         self.selected.clear()

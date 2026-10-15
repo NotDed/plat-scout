@@ -138,6 +138,52 @@ def plan(rows, pricing="match"):
     return plans
 
 
+# ---- undercut watcher -------------------------------------------------------
+def watch():
+    """Your sell orders vs the cheapest *other* online seller of the same item,
+    rank and subtype. Read-only."""
+    import prices  # public order book, no token needed
+    me_id = (me() or {}).get("id")
+    by_id = {i["id"]: i for i in extract.load_market().values()}
+    rows = []
+    for o in my_orders():
+        if o.get("type") != "sell":
+            continue
+        item = by_id.get(o["itemId"], {})
+        name = item.get("i18n", {}).get("en", {}).get("name", o["itemId"])
+        book = prices.get(f"/orders/item/{item['slug']}") or [] if item else []
+        time.sleep(prices.DELAY)
+        others = [x["platinum"] for x in book
+                  if x["type"] == "sell" and x.get("visible", True)
+                  and x["user"].get("status") in ("online", "ingame")
+                  and x["user"].get("id") != me_id
+                  and x.get("rank") == o.get("rank") and x.get("subtype") == o.get("subtype")]
+        lowest = min(others) if others else None
+        if not o.get("visible", True):
+            status = "hidden"
+        elif lowest is None:
+            status = "only seller online"
+        elif o["platinum"] <= lowest:
+            status = "cheapest"
+        else:
+            status = "undercut"
+        rows.append({"id": o["id"], "name": name, "rank": o.get("rank"), "subtype": o.get("subtype"),
+                     "quantity": o.get("quantity"), "myPrice": o["platinum"], "lowestOther": lowest,
+                     "undercutBy": o["platinum"] - lowest if status == "undercut" else 0,
+                     "status": status, "slug": item.get("slug")})
+    return rows
+
+
+def reprice(row, mode="match"):
+    """New price for an undercut listing: match the cheapest other seller, or 1p under."""
+    low = row["lowestOther"]
+    return max(1, low - 1) if mode == "undercut" else low
+
+
+def apply_reprice(row, price):
+    return call("PATCH", f"/order/{row['id']}", {"platinum": int(price)})
+
+
 def log(p, error=None):
     """Append one line per post attempt to data/listing.log."""
     with open(DATA / "listing.log", "a") as f:

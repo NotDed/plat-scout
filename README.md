@@ -37,7 +37,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`5` or `←`/`→` tabs (mods, arcanes, items, sets, relics), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout plan` | day-by-day trade plan (see below), no new price scan |
 | `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
@@ -69,6 +69,25 @@ Press `w` for **My listings**: each of your sell orders vs the cheapest *other*
 online seller of the same item, rank and subtype. Undercut ones are flagged;
 `y` reprices them (match the cheapest, or `p` for 1p under). Nothing changes
 without `y`.
+
+## Buying (BUY tab, `6`)
+
+A cart for things you want to buy. `a` opens a search over every tradable item
+(the closest name is completed in grey as you type: `Tab` or `→` accepts it,
+`↑↓` picks from the matches); then set rank, refinement, how many and an
+optional max price per copy. The cart is saved in `data/cart.json`.
+
+For every cart item the tab finds the online sellers of that exact rank /
+refinement, cheapest first, in-game before online, then by reputation:
+
+- `Enter` (or **Copy whisper**) copies warframe.market's message for the current
+  seller, ready to paste in Warframe chat
+- `>` / `<` (or **Next** / **Prev**) when a seller doesn't answer
+- `b` (**Bought**) takes one off the quantity, `Del` (**Remove**) drops the item
+- `s` refreshes all sellers
+
+The clipboard uses `wl-copy` (Wayland), `xclip`/`xsel` (X11), or your
+terminal's clipboard as a fallback.
 
 ## Trade planner (`plat-scout plan`)
 

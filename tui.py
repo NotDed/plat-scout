@@ -13,11 +13,13 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
+from textual.suggester import Suggester
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual import work
-from textual.widgets import DataTable, Footer, Input, ProgressBar, Static
+from textual.widgets import Button, DataTable, Footer, Input, ProgressBar, Static
 
+import buying
 import listing
 
 REPO = Path(__file__).resolve().parent
@@ -34,7 +36,8 @@ RANKINGS = {  # key -> (file, score field, label)
 }
 # tabs with a single ranking of their own, made by extras.py
 SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set")}
-TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics")]
+TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics"),
+        ("6", "buy")]
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
 RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
                     ("volume", "volume")]
@@ -47,6 +50,9 @@ COLUMNS = {  # per tab layout: (header, field); "score" = the ranking's own scor
     "sets": [("#", "#"), ("Set", "name"), ("Gain", "score"), ("Set", "lowestPrice"),
              ("Buy", "bestBuy"), ("Missing", "missingCost"), ("/day", "tradesPerDay"),
              ("Trend", "trend"), ("Parts", "yourCopies"), ("Action", "action")],
+    "buy": [("#", "#"), ("Item", "name"), ("Total", "score"), ("Qty", "qty"), ("Price", "lowestPrice"),
+            ("Seller", "seller"), ("Rep", "rep"), ("Status", "status"), ("Seller #", "sellerPos"),
+            ("Next step", "action")],
     "relics": [("#", "#"), ("Relic", "name"), ("Potential", "score"), ("Sell", "lowestPrice"),
                ("Buy", "bestBuy"), ("Crack", "averagePrice"), ("/day", "tradesPerDay"),
                ("Trend", "trend"), ("Own", "yourCopies"), ("Best action", "action")],
@@ -316,6 +322,136 @@ class ReviewScreen(ModalScreen):
                                   timeout=12)
 
 
+class ItemSuggester(Suggester):
+    """Grey inline completion with the closest item name, like warframe.market."""
+
+    def __init__(self):
+        super().__init__(use_cache=True, case_sensitive=False)
+
+    async def get_suggestion(self, value):
+        return buying.complete(value)
+
+
+class AddScreen(ModalScreen):
+    """Search any tradable item and add it to the buying cart."""
+    CSS = """
+    AddScreen { align: center middle; background: #0b0f17 70%; }
+    #add { width: 84; height: auto; max-height: 90%; border: round #3ddc84; background: #0f1522; padding: 1 2; }
+    #add Input { border: tall #2a3550; }
+    #add Input:focus { border: tall #3ddc84; }
+    #add-results { height: auto; margin: 0 0 1 0; }
+    #add-form { height: auto; display: none; }
+    """
+    BINDINGS = [Binding("escape", "dismiss", "Cancel"),
+                Binding("tab", "complete", "Complete", show=False, priority=True),
+                Binding("up", "move(-1)", "Up", show=False, priority=True),
+                Binding("down", "move(1)", "Down", show=False, priority=True)]
+
+    def __init__(self):
+        super().__init__()
+        self.hits, self.pick, self.item = [], 0, None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="add"):
+            yield Static(markup("[b #e8eefc]Add to cart[/]  [#8a93a6]type a name · Tab/→ completes ·"
+                                " ↑↓ to pick · Enter[/]"))
+            yield Input(placeholder="item name, e.g. serration, axi a22, nekros prime set", id="add-q",
+                        suggester=ItemSuggester())
+            yield Static(id="add-results")
+            with Vertical(id="add-form"):
+                yield Static(id="add-item")
+                yield Input(placeholder="rank", id="add-rank")
+                yield Input(placeholder="refinement", id="add-sub")
+                yield Input(value="1", placeholder="how many", id="add-qty")
+                yield Input(placeholder="max price per copy (optional)", id="add-max")
+                yield Static(markup("[#8a93a6]Enter adds it · ↑↓ move between fields · esc cancels[/]"))
+
+    def on_mount(self):
+        self.query_one("#add-q").focus()
+
+    def draw_results(self):
+        lines = []
+        for n, i in enumerate(self.hits):
+            extra = (f" [#5b6680]rank 0-{i['maxRank']}[/]" if i.get("maxRank") else "") + \
+                    (f" [#5b6680]{'/'.join(i['subtypes'])}[/]" if i.get("subtypes") else "")
+            lines.append(f"[reverse b #9fd8ff] {i['name']} [/]{extra}" if n == self.pick
+                         else f" {i['name']}{extra}")
+        q = self.query_one("#add-q", Input).value
+        self.query_one("#add-results", Static).update(markup(
+            "\n".join(lines) if lines else ("[#5b6680]no match[/]" if q.strip() else "")))
+
+    def on_input_changed(self, event: Input.Changed):
+        event.stop()  # keep the main screen's search out of this
+        if event.input.id == "add-q":
+            self.hits, self.pick = buying.search(event.value), 0
+            self.draw_results()
+
+    def action_complete(self):
+        """Tab: take the grey completion in the search box (elsewhere: next field)."""
+        box = self.query_one("#add-q", Input)
+        if self.focused is box:
+            best = buying.complete(box.value)
+            if best and best.lower() != box.value.lower():
+                box.value = best
+                box.cursor_position = len(best)
+            return
+        self.focus_next()
+
+    def action_move(self, step):
+        if self.focused and self.focused.id == "add-q":
+            if self.hits:
+                self.pick = (self.pick + step) % len(self.hits)
+                self.draw_results()
+        elif step > 0:
+            self.focus_next()
+        else:
+            self.focus_previous()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        event.stop()
+        if event.input.id == "add-q":
+            if not self.hits:
+                return
+            self.item = self.hits[self.pick]
+            self.show_form()
+        else:
+            self.submit()
+
+    def show_form(self):
+        i = self.item
+        self.query_one("#add-item", Static).update(markup(f"[b #3ddc84]{i['name']}[/]"))
+        rank, sub = self.query_one("#add-rank", Input), self.query_one("#add-sub", Input)
+        rank.display = bool(i.get("maxRank"))
+        rank.placeholder, rank.value = f"rank 0-{i.get('maxRank')}", "0"
+        sub.display = bool(i.get("subtypes"))
+        sub.placeholder = " / ".join(i.get("subtypes", []))
+        sub.value = (i.get("subtypes") or [""])[0]
+        self.query_one("#add-form").display = True
+        self.query_one("#add-qty", Input).focus()
+
+    def submit(self):
+        i = self.item
+        val = lambda w: self.query_one(f"#add-{w}", Input).value.strip()
+        try:
+            rank = int(val("rank")) if i.get("maxRank") else None
+            qty = int(val("qty") or 1)
+            max_price = int(val("max")) if val("max") else None
+        except ValueError:
+            self.notify("rank, quantity and max price must be numbers", severity="error")
+            return
+        sub = val("sub") if i.get("subtypes") else None
+        if rank is not None and not 0 <= rank <= i["maxRank"]:
+            self.notify(f"rank must be 0-{i['maxRank']}", severity="error")
+            return
+        if sub is not None and sub not in i["subtypes"]:
+            self.notify(f"refinement must be one of: {', '.join(i['subtypes'])}", severity="error")
+            return
+        if qty < 1:
+            self.notify("quantity must be at least 1", severity="error")
+            return
+        self.dismiss({"item": i, "rank": rank, "subtype": sub, "qty": qty, "max": max_price})
+
+
 class WatchScreen(ModalScreen):
     """Your warframe.market listings vs the cheapest other seller; reprice on y."""
     CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen")
@@ -421,6 +557,10 @@ class PlatScout(App):
     DataTable > .datatable--header { background: #141b2b; color: #9fd8ff; text-style: bold; }
     DataTable > .datatable--cursor { background: #1f6f4a; color: #ffffff; }
     #side { width: 44; }
+    #buy-buttons { height: auto; display: none; }
+    #buy-buttons Horizontal { height: auto; }
+    #buy-buttons Button { min-width: 9; width: 1fr; margin: 0 0 0 0; }
+    #buy-copy { width: 100%; }
     #detail { height: 1fr; border: round #2a3550; padding: 1 2; }
     #scan { display: none; height: 3; margin: 0 2; padding: 0 1; border: round #3ddc84; }
     #scan.running { display: block; }
@@ -447,6 +587,11 @@ class PlatScout(App):
         Binding("space", "toggle_select", "Select", show=False),
         Binding("l", "list_selected", "List on market"),
         Binding("w", "watch", "My listings"),
+        Binding("a", "buy_add", "Add to cart"),
+        Binding("greater_than_sign", "buy_next", "Next seller"),
+        Binding("less_than_sign", "buy_prev", "Prev seller", show=False),
+        Binding("b", "buy_bought", "Bought"),
+        Binding("delete", "buy_remove", "Remove from cart"),
         Binding("s", "scan", "Scan tab"),
         Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
@@ -463,6 +608,8 @@ class PlatScout(App):
         self.selected = set()  # (name, action) of rows marked with space
         self.sort_keys = []  # [(column index, descending)], first = primary
         self.rank_desc = True  # direction of the ranking order when no sort keys
+        self.buy_sellers = {}  # (slug, rank, subtype) -> sellers, best first
+        self.buy_loading = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -477,6 +624,13 @@ class PlatScout(App):
             yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="side"):
                 yield Static(id="detail")
+                with Vertical(id="buy-buttons"):
+                    yield Button("Copy whisper  (Enter)", id="buy-copy", variant="success")
+                    with Horizontal():
+                        yield Button("< Prev", id="buy-prev")
+                        yield Button("Next >", id="buy-next", variant="primary")
+                        yield Button("Bought", id="buy-bought")
+                        yield Button("Remove", id="buy-remove", variant="error")
         yield Footer()
 
     def on_mount(self):
@@ -487,14 +641,26 @@ class PlatScout(App):
 
     # ---- data -------------------------------------------------------------
     def path(self):
+        if self.kind == "buy":
+            return buying.CART
         if self.kind in SPECIAL:
             return DATA / SPECIAL[self.kind][0]
         return DATA / (KINDS[self.kind] + RANKINGS[self.ranking][0])
 
     def field(self):
-        return "score" if self.kind in SPECIAL else RANKINGS[self.ranking][1]
+        return "score" if self.kind in SPECIAL or self.kind == "buy" else RANKINGS[self.ranking][1]
 
     def load(self):
+        self.query_one("#buy-buttons").display = self.kind == "buy"
+        if self.kind == "buy":
+            self.meta = self.buy_meta()
+            try:
+                self.mtime = buying.CART.stat().st_mtime
+            except OSError:
+                self.mtime = None
+            self.refresh_view()
+            self.fetch_missing_sellers()
+            return
         p = self.path()
         try:
             self.meta = json.loads(p.read_text())
@@ -509,6 +675,139 @@ class PlatScout(App):
                 self.load()
         except OSError:
             pass
+
+    # ---- buying -----------------------------------------------------------
+    @staticmethod
+    def buy_key(e):
+        return (e["slug"], e.get("rank"), e.get("subtype"))
+
+    def buy_meta(self):
+        """Cart entries as table rows, each with its current seller."""
+        rows = []
+        cart = buying.load_cart()
+        for n, e in enumerate(cart):
+            found = self.buy_sellers.get(self.buy_key(e))
+            row = {"id": "|".join(map(str, self.buy_key(e))), "buyRow": True, "entry": n,
+                   "name": buying.item_label(e), "qty": e["qty"], "maxPrice": e.get("maxPrice"),
+                   "score": 0, "lowestPrice": None, "seller": "", "rep": "", "status": "",
+                   "sellerPos": "", "sellers": [], "url": f"https://warframe.market/items/{e['slug']}"}
+            if found is None:
+                row["action"] = "looking for sellers…"
+            else:
+                ok = [x for x in found if not e.get("maxPrice") or x["price"] <= e["maxPrice"]]
+                if not ok:
+                    row["action"] = "no seller online" + (f" at ≤{e['maxPrice']}p" if e.get("maxPrice") else "")
+                else:
+                    i = min(e.get("sellerIndex", 0), len(ok) - 1)
+                    cur = ok[i]
+                    row.update({"sellers": ok, "index": i, "current": cur, "lowestPrice": cur["price"],
+                                "score": cur["price"] * e["qty"], "seller": cur["name"],
+                                "rep": cur["reputation"], "status": cur["status"],
+                                "sellerPos": f"{i + 1}/{len(ok)}", "whisper": buying.whisper(cur, e),
+                                "action": "Enter: copy whisper"})
+            rows.append(row)
+        return {"candidates": rows, "progress": f"{len(cart)} item(s) in cart",
+                "updated": time.strftime("%H:%M:%S")}
+
+    def fetch_missing_sellers(self, force=False):
+        if self.buy_loading:
+            return
+        keys = [self.buy_key(e) for e in buying.load_cart()]
+        todo = [k for k in dict.fromkeys(keys) if force or k not in self.buy_sellers]
+        if todo:
+            self.buy_loading = True
+            self.sellers_worker(todo)
+
+    @work(thread=True, group="buy")
+    def sellers_worker(self, keys):
+        import prices
+        try:
+            for k in keys:
+                try:
+                    self.buy_sellers[k] = buying.sellers(*k)
+                except Exception as e:  # keep going; show the problem on that row
+                    self.buy_sellers[k] = []
+                    self.call_from_thread(self.notify, f"{k[0]}: {e}", severity="error")
+                if self.kind == "buy":
+                    self.call_from_thread(self.load_if_buy)
+                time.sleep(prices.DELAY)
+        finally:
+            self.buy_loading = False
+
+    def load_if_buy(self):
+        if self.kind == "buy":
+            self.meta = self.buy_meta()
+            self.refresh_view()
+
+    def current_buy_row(self):
+        table = self.query_one(DataTable)
+        if self.kind == "buy" and self.rows and 0 <= table.cursor_row < len(self.rows):
+            return self.rows[table.cursor_row]
+        return None
+
+    def edit_cart(self, row, change):
+        cart = buying.load_cart()
+        if row and 0 <= row["entry"] < len(cart):
+            change(cart, cart[row["entry"]])
+            buying.save_cart(cart)
+            self.load_if_buy()
+
+    def action_buy_add(self):
+        def added(result):
+            if result:
+                buying.add(buying.load_cart(), result["item"], result["rank"], result["subtype"],
+                           result["qty"], result["max"])
+                self.notify(f"added {result['item']['name']} to the cart")
+                self.load()
+        self.push_screen(AddScreen(), added)
+
+    def action_buy_copy(self):
+        row = self.current_buy_row()
+        if not row or not row.get("whisper"):
+            self.notify("no seller to whisper yet", severity="warning")
+            return
+        if not buying.copy(row["whisper"]):
+            self.copy_to_clipboard(row["whisper"])  # terminal clipboard (OSC 52)
+        self.notify(f"copied — paste it in Warframe chat:\n{row['whisper']}", timeout=8)
+
+    def step_seller(self, step):
+        row = self.current_buy_row()
+        if not row or not row.get("sellers"):
+            return
+
+        def move(cart, e):
+            e["sellerIndex"] = (row["index"] + step) % len(row["sellers"])
+        self.edit_cart(row, move)
+
+    def action_buy_next(self):
+        self.step_seller(1)
+
+    def action_buy_prev(self):
+        self.step_seller(-1)
+
+    def action_buy_bought(self):
+        row = self.current_buy_row()
+
+        def bought(cart, e):
+            e["qty"] -= 1
+            e["sellerIndex"] = 0
+            if e["qty"] <= 0:
+                cart.remove(e)
+        self.edit_cart(row, bought)
+
+    def action_buy_remove(self):
+        self.edit_cart(self.current_buy_row(), lambda cart, e: cart.remove(e))
+
+    def on_button_pressed(self, event: Button.Pressed):
+        action = {"buy-copy": self.action_buy_copy, "buy-next": self.action_buy_next,
+                  "buy-prev": self.action_buy_prev, "buy-bought": self.action_buy_bought,
+                  "buy-remove": self.action_buy_remove}.get(event.button.id)
+        if action:
+            action()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected):
+        if self.kind == "buy":  # Enter on a cart row copies the whisper
+            self.action_buy_copy()
 
     def visible(self):
         rows = self.meta.get("candidates", [])
@@ -526,7 +825,8 @@ class PlatScout(App):
         old_rows = getattr(self, "rows", [])
         keep = None
         if old_rows and 0 <= table.cursor_row < len(old_rows):
-            keep = (old_rows[table.cursor_row]["name"], old_rows[table.cursor_row]["action"])
+            old = old_rows[table.cursor_row]
+            keep = old.get("id") or (old["name"], old["action"])
         scroll_y = table.scroll_y
 
         ranked = self.visible()
@@ -549,7 +849,8 @@ class PlatScout(App):
         for i, c in enumerate(self.rows, 1):
             table.add_row(*(self.cell(c, f, field, top) for _, f in COLUMNS[layout]), key=str(i))
         self.draw_headline()
-        index = next((i for i, c in enumerate(self.rows) if (c["name"], c["action"]) == keep), None)
+        index = next((i for i, c in enumerate(self.rows)
+                      if (c.get("id") or (c["name"], c["action"])) == keep), None)
         if self.rows:
             # same row still here (re-sort, reload): stay put; otherwise start at the top
             table.scroll_to(y=scroll_y if index is not None else 0, animate=False)
@@ -670,6 +971,19 @@ class PlatScout(App):
         ranks = "[#e3c75b]v[/] " + "  ".join(
             f"[b #e3c75b]{name}[/]" if key == self.ranking else f"[#5b6680]{name}[/]"
             for key, name in self.rank_order())
+        if self.kind == "buy":
+            total = sum(c["score"] for c in self.rows)
+            lines = [TITLE, "", tabs,
+                     "[#5b6680]cart · cheapest in-game sellers first[/]"
+                     f"   [#e3c75b]c[/] [#5b6680]sort:[/] [b #9fd8ff]{self.sort_label()}[/]",
+                     ("[#8a93a6]cart is empty — press[/] [b #e3c75b]a[/] [#8a93a6]to add an item[/]"
+                      if not self.rows else
+                      f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]for {len(self.rows)} item(s) at the current sellers[/]"),
+                     "[#e3c75b]a[/] add · [#e3c75b]Enter[/] copy whisper · [#e3c75b]>[/] next seller"
+                     " · [#e3c75b]<[/] previous · [#e3c75b]b[/] bought · [#e3c75b]Del[/] remove"
+                     " · [#e3c75b]s[/] refresh sellers"]
+            self.query_one("#headline", Static).update(markup("\n".join(lines)))
+            return
         if not self.meta:
             status = f"[#ff6b6b]no data yet[/] — press [b]s[/] to scan {self.kind}"
         else:
@@ -701,6 +1015,28 @@ class PlatScout(App):
         box = self.query_one("#detail", Static)
         if not c:
             box.update(markup("[#5b6680]nothing to show[/]"))
+            return
+        if c.get("buyRow"):
+            lines = [f"[b #e8eefc]{c['name']}[/]",
+                     f"[#8a93a6]want[/] {c['qty']}" + (f" [#8a93a6]· max[/] {c['maxPrice']}p" if c.get("maxPrice") else ""), ""]
+            cur = c.get("current")
+            if not cur:
+                lines.append(f"[#ff9f5a]{c['action']}[/]")
+            else:
+                status = "[#3ddc84]in game[/]" if cur["status"] == "ingame" else "[#8a93a6]online[/]"
+                lines += [f"[b #9fd8ff]seller {c['sellerPos']}[/]",
+                          f"[b]{cur['name']}[/]  {status}",
+                          f"[#8a93a6]price[/] [b #9fd8ff]{cur['price']}p[/] [#8a93a6]· has[/] {cur['quantity']}"
+                          f" [#8a93a6]· reputation[/] {cur['reputation']}", "",
+                          "[#8a93a6]whisper[/]", f"[#e8eefc]{c['whisper']}[/]", "",
+                          "[#8a93a6]next sellers[/]"]
+                rest = c["sellers"][c["index"] + 1:c["index"] + 4]
+                for x in rest:
+                    tag = "[#3ddc84]●[/]" if x["status"] == "ingame" else "[#8a93a6]○[/]"
+                    lines.append(f"{tag} {x['name'][:20]:<20} {x['price']:>5}p")
+                if not rest:
+                    lines.append("[#5b6680]none after this one[/]")
+            box.update(markup("\n".join(lines)))
             return
         plat = lambda v: f"{v}p" if v is not None else "-"
         extra = ""
@@ -805,6 +1141,11 @@ class PlatScout(App):
         # while typing in a text box, left/right move the text cursor instead
         if action == "step_tab" and (isinstance(self.focused, Input) or self.screen is not self.screen_stack[0]):
             return False
+        if action.startswith("buy_"):
+            return self.kind == "buy"
+        if self.kind == "buy" and action in ("next_ranking", "toggle_quick", "toggle_select",
+                                             "list_selected", "scan_all"):
+            return False
         return True
 
     def rank_order(self):
@@ -812,8 +1153,8 @@ class PlatScout(App):
 
     def layout(self):
         """Which header row the table uses."""
-        if self.kind == "sets":
-            return "sets"
+        if self.kind in ("sets", "buy"):
+            return self.kind
         return "relics" if self.kind == "relics" and self.ranking == "crack" else "default"
 
     def action_kind(self, kind):
@@ -969,6 +1310,11 @@ class PlatScout(App):
         return True
 
     def action_scan(self):
+        if self.kind == "buy":  # refresh the sellers of everything in the cart
+            self.buy_sellers.clear()
+            self.fetch_missing_sellers(force=True)
+            self.load_if_buy()
+            return
         if not self.source(self.kind).exists():
             self.notify(f"{self.source(self.kind).name} not found. Press u to update your "
                         "inventory first.", severity="error")
@@ -977,7 +1323,7 @@ class PlatScout(App):
         self.run_steps(self.scan_steps(self.kind))
 
     def action_scan_all(self):
-        kinds = [k for _, k in TABS if self.source(k).exists()]
+        kinds = [k for _, k in TABS if k != "buy" and self.source(k).exists()]
         steps = [step for k in kinds for step in self.scan_steps(k)]
         if not steps:
             self.notify("nothing to scan. Press u to update your inventory first.", severity="error")

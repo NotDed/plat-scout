@@ -167,8 +167,8 @@ def main():
     s.add_argument("--quick", action="store_true", help="hide options that need ranking up or fusing")
     s.set_defaults(func=cmd_top)
 
-    s = sub.add_parser("sound", help="play an alert sound: message (answered/whispered), done, bell")
-    s.add_argument("kind", nargs="?", default="message", choices=["message", "done", "bell"])
+    s = sub.add_parser("sound", help="play an alert sound: message (incoming whisper) or done (trade)")
+    s.add_argument("kind", nargs="?", default="message", choices=["message", "done"])
     s.set_defaults(func=cmd_sound)
 
     s = sub.add_parser("tui", help="browse the rankings in an interactive terminal UI")

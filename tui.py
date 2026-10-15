@@ -4,6 +4,8 @@ import asyncio
 import functools
 import json
 import re
+import shutil
+import subprocess
 import sys
 import time
 import webbrowser
@@ -455,8 +457,11 @@ class AddScreen(ModalScreen):
 
 
 class SoundScreen(ModalScreen):
-    """Pick the sound and how many times it plays for each alert."""
-    CSS = ReviewScreen.CSS.replace("ReviewScreen", "SoundScreen")
+    """Pick the sound and how many times it plays for each alert: system sounds,
+    files you drop in data/sounds/, or any file path."""
+    CSS = ReviewScreen.CSS.replace("ReviewScreen", "SoundScreen") + """
+    #sound-path { display: none; margin: 1 0 0 0; border: tall #e3c75b; }
+    """
     BINDINGS = [Binding("up", "move(-1)", show=False, priority=True),
                 Binding("down", "move(1)", show=False, priority=True),
                 Binding("left", "sound(-1)", show=False, priority=True),
@@ -464,32 +469,59 @@ class SoundScreen(ModalScreen):
                 Binding("plus,equals_sign", "times(1)", show=False),
                 Binding("minus", "times(-1)", show=False),
                 Binding("enter", "preview", show=False, priority=True),
+                Binding("f", "file", show=False),
+                Binding("d", "default", show=False),
+                Binding("o", "folder", show=False),
                 Binding("m", "mute", show=False),
-                Binding("escape", "dismiss", "Close")]
-    KINDS = ["message", "done", "bell"]
+                Binding("left_square_bracket", "cooldown(-15)", show=False),
+                Binding("right_square_bracket", "cooldown(15)", show=False),
+                Binding("escape", "close", "Close", priority=True)]
+    KINDS = ["message", "done"]
+    TYPING_OFF = {"move", "sound", "times", "preview", "file", "default", "folder", "mute", "cooldown"}
+    AUTO_FOCUS = None  # the hidden path box must not take the keys
 
     def __init__(self):
         super().__init__()
-        self.pick, self.sounds = 0, alerts.available_sounds()
+        self.pick = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
             yield Static(id="review-body")
+            yield Input(placeholder="path to a sound file (.ogg .wav .flac .mp3), Enter to use it",
+                        id="sound-path", disabled=True)  # enabled only while typing a path
 
     def on_mount(self):
+        self.set_focus(None)
         self.draw()
 
-    def draw(self):
-        lines = ["[b #e8eefc]Alert sounds[/]   " + ("[#ff6b6b]🔕 muted[/]" if alerts.muted() else "[#3ddc84]🔔 on[/]"), ""]
+    def action_cooldown(self, step):
+        alerts.set_cooldown(alerts.cooldown() + step)
+        self.draw()
+
+    def check_action(self, action, parameters):
+        # while typing a path, keys go to the text box
+        typing = isinstance(self.focused, Input)
+        return not (typing and action in self.TYPING_OFF)
+
+    def draw(self, note=""):
+        lines = ["[b #e8eefc]Alert sounds[/]   " + ("[#ff6b6b]🔕 muted[/]" if alerts.muted()
+                                                     else "[#3ddc84]🔔 on[/]"), ""]
         for n, kind in enumerate(self.KINDS):
             path, times = alerts.sound_for(kind)
-            mark = "[reverse b #9fd8ff]" if n == self.pick else ""
-            end = "[/]" if mark else ""
-            lines.append(f"{mark} {alerts.LABELS[kind]:<40} {path.stem:<28} ×{times} {end}")
-        lines += ["", "[#8a93a6]↑↓ choose · ←→ change sound (plays it) · + / − times · Enter play"
-                      " · m mute · Esc close[/]"]
-        if not self.sounds:
-            lines.append("[#ff6b6b]no sound theme found in /usr/share/sounds/freedesktop/stereo[/]")
+            star = "★ " if alerts.is_custom(path) else ""
+            missing = " [#ff6b6b](file missing)[/]" if not path.exists() else ""
+            mark, end = ("[reverse b #9fd8ff]", "[/]") if n == self.pick else ("", "")
+            lines.append(f"{mark} {alerts.LABELS[kind]:<40} {star}{path.stem[:28]:<28} ×{times} {end}{missing}")
+        mine = sum(1 for p in alerts.available_sounds() if alerts.is_custom(p))
+        lines += ["",
+                  "[#8a93a6]↑↓ choose · ←→ change sound (plays it) · + / − times · Enter play[/]",
+                  "[#8a93a6][b]f[/b] use any file · [b]o[/b] open your sounds folder"
+                  f" ({mine} file{'s' if mine != 1 else ''}, ★ listed first) · [b]d[/b] default"
+                  " · [b]m[/b] mute · Esc close[/]",
+                  f"[#8a93a6]same person rings at most once every[/] [b]{alerts.cooldown()}s[/]"
+                  " [#8a93a6]([b]\\[[/b] / [b]][/b] to change; different people always ring)[/]"]
+        if note:
+            lines += ["", note]
         self.query_one("#review-body", Static).update(markup("\n".join(lines)))
 
     def kind(self):
@@ -500,23 +532,68 @@ class SoundScreen(ModalScreen):
         self.draw()
 
     def action_sound(self, step):
-        if not self.sounds:
+        sounds = alerts.available_sounds()  # re-read: picks up files dropped in meanwhile
+        if not sounds:
+            self.draw("[#ff6b6b]no sounds found: add files to data/sounds/ or press f[/]")
             return
         path, times = alerts.sound_for(self.kind())
-        i = self.sounds.index(path.name) if path.name in self.sounds else -1
-        alerts.set_sound(self.kind(), self.sounds[(i + step) % len(self.sounds)], times)
+        i = sounds.index(str(path)) if str(path) in sounds else -1
+        alerts.set_sound(self.kind(), sounds[(i + step) % len(sounds)], times)
         self.draw()
         self.action_preview()
 
     def action_times(self, step):
         path, times = alerts.sound_for(self.kind())
-        alerts.set_sound(self.kind(), path.name if path.parent == alerts.SOUND_DIR else str(path),
-                         times + step)
+        alerts.set_sound(self.kind(), path, times + step)
         self.draw()
 
     def action_preview(self):
         if not alerts.play(self.kind()):
             self.app.bell()
+            self.draw("[#ff6b6b]couldn't play it (missing file, or install mpv / ffplay for this format)[/]")
+
+    def action_default(self):
+        alerts.reset_sound(self.kind())
+        self.draw()
+        self.action_preview()
+
+    def action_folder(self):
+        alerts.USER_SOUNDS.mkdir(parents=True, exist_ok=True)
+        opener = shutil.which("xdg-open")
+        if opener:
+            subprocess.Popen([opener, str(alerts.USER_SOUNDS)], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        self.draw(f"[#8a93a6]put your sound files in[/] {alerts.USER_SOUNDS}"
+                  " [#8a93a6]then press ←→ to find them (★)[/]")
+
+    def action_file(self):
+        box = self.query_one("#sound-path", Input)
+        box.display, box.disabled, box.value = True, False, ""
+        box.focus()
+
+    def on_input_changed(self, event: Input.Changed):
+        event.stop()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        event.stop()
+        path, error = alerts.check_file(event.value)
+        if error:
+            self.draw(f"[#ff6b6b]{error}[/]")
+            return
+        alerts.set_sound(self.kind(), path, alerts.sound_for(self.kind())[1])
+        event.input.display, event.input.disabled = False, True
+        self.set_focus(None)
+        self.draw(f"[#3ddc84]now using {path.name}[/]")
+        self.action_preview()
+
+    def action_close(self):
+        box = self.query_one("#sound-path", Input)
+        if box.display:  # Esc while typing a path: just cancel the path
+            box.display, box.disabled = False, True
+            self.set_focus(None)
+            self.draw()
+        else:
+            self.dismiss()
 
     def action_mute(self):
         alerts.set_muted(not alerts.muted())
@@ -904,8 +981,8 @@ class PlatScout(App):
                 self.notify(f"game log: {err}", severity="warning")
         self.check_no_answer()
 
-    def game_alert(self, kind, title, body=""):
-        if not alerts.alert(kind, title, body) and not alerts.muted():
+    def game_alert(self, kind, title, body="", who=None):
+        if alerts.alert(kind, title, body, who=who) == "failed":
             self.bell()  # no sound player: at least the terminal bell
         self.notify(title + (f" — {body}" if body else ""), timeout=12)
 
@@ -927,12 +1004,13 @@ class PlatScout(App):
                 for x in waiting:
                     x["answered"] = True
                 changed = True
-                self.game_alert("message", f"{name} answered", f"{how} — {waiting[0]['name']}")
+                self.game_alert("message", f"{name} answered", f"{how} — {waiting[0]['name']}", who=name)
             elif kind == "whisper_received":
                 self.whispers = [(name, e["time"])] + [w for w in self.whispers if w[0] != name][:2]
-                self.game_alert("message", f"{name} whispered you", "probably about one of your listings")
+                self.game_alert("message", f"{name} whispered you", "probably about one of your listings",
+                                who=name)
             elif kind == "trade_request":
-                self.game_alert("message", f"{name} wants to trade with you")
+                self.game_alert("message", f"{name} wants to trade with you", who=name)
         elif kind == "trade_done" and e.get("offer"):
             offer = e["offer"]
             paid, got = gamelog.platinum(offer["offered"]), gamelog.goods(offer["received"])
@@ -975,9 +1053,7 @@ class PlatScout(App):
             key = (x["slug"], who, since)
             if now - since >= buying.NO_ANSWER_MIN * 60 and key not in self.no_answer_alerted:
                 self.no_answer_alerted.add(key)
-                self.game_alert("bell", f"{who} hasn't answered",
-                                f"{x['name']}: press > for the next seller")
-                self.load_if_buy()
+                self.load_if_buy()  # the row turns orange; no sound on purpose
 
     def action_sounds(self):
         self.push_screen(SoundScreen(), lambda _: self.draw_headline())

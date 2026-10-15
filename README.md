@@ -97,7 +97,8 @@ While the TUI is open it follows Warframe's `EE.log` (read-only; set
 - **You whisper a seller** from the BUY tab → that row shows "whispered X, waiting…"
 - **The seller answers** (invites you, asks to trade, or whispers you) → sound +
   desktop notification, row says "answered: accept the invite / trade"
-- **No answer in 5 minutes** → bell, row says "press > for the next seller"
+- **No answer in 5 minutes** → the row turns orange: "press > for the next seller"
+  (no sound)
 - **Trade successful** (you paid platinum for a cart item) → it's ticked off the
   cart automatically and recorded in `data/purchases.jsonl`
 - **Someone whispers you first** → sound + notification, and `💬 name` in the
@@ -107,11 +108,14 @@ While the TUI is open it follows Warframe's `EE.log` (read-only; set
   `n` keeps them listed)
 
 Sounds play with `pw-play`/`paplay`, notifications use `notify-send`; `m` mutes /
-unmutes. Defaults: an answer or a whisper rings `phone-incoming-call` twice, a
-finished trade plays `service-login`, no answer plays `dialog-warning` twice.
+unmutes. Only two things make a sound: an **incoming whisper** (including a seller
+answering you) rings `phone-incoming-call` twice, and a **successful trade** plays
+`service-login`. The same person rings at most once a minute (different people
+always ring); change it with `[` / `]` on the Sounds screen.
 Change them in the TUI with `,` (**Sounds**: ↑↓ pick the alert, ←→ cycle through
-every sound on your system with a preview, +/− how many times it plays), preview
-from a terminal with `plat-scout sound message|done|bell`, or edit
+every sound on your system with a preview, +/− how many times it plays, `f` any file, `o` your sounds folder `data/sounds/`
+whose files are listed first, `d` back to the default), preview
+from a terminal with `plat-scout sound message|done`, or edit
 `data/settings.json`, e.g. `{"sounds": {"message": ["alarm-clock-elapsed.oga", 1]}}`
 (any name from `/usr/share/sounds/freedesktop/stereo/` or a full path). The game doesn't log the *text* of whispers
 you receive, only that a conversation started.

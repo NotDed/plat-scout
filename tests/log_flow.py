@@ -25,7 +25,7 @@ LOG = TMP / "EE.log"
 LOG.write_text("")
 
 heard = []
-alerts.alert = lambda kind, title, body="": heard.append((kind, title)) or True
+alerts.alert = lambda kind, title, body="", **kw: heard.append((kind, title)) or "played"
 buying.sellers = lambda slug, rank=None, subtype=None: [
     {"name": "Gomhera", "price": 35, "quantity": 1, "reputation": 30, "status": "ingame"},
     {"name": "Other", "price": 36, "quantity": 1, "reputation": 3, "status": "online"}]
@@ -107,8 +107,10 @@ async def main():
         cart[0].update(whisperedTo="Slowpoke", whisperedAt=time.time() - 360, answered=False)
         buying.save_cart(cart)
         app.load_if_buy()
-        await wait(pilot, lambda: heard and heard[-1][0] == "bell")
-        print("no answer:", row(app)["action"], "| alert:", heard[-1])
+        sounds = len(heard)
+        await wait(pilot, lambda: row(app).get("state") == "no-answer")
+        print("no answer:", row(app)["action"], "| silent:", len(heard) == sounds)
+        await wait(pilot, lambda: row(app).get("current"))
         await pilot.press("greater_than_sign")
         await pilot.pause()
         print("after >:", row(app)["seller"], "|", row(app)["action"])

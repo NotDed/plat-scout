@@ -82,7 +82,8 @@ def build_logo():
     for y, line in enumerate(plat):
         for x, ch in enumerate(line):
             sampled = colors[y][x] if y < len(colors) and x < len(colors[y]) else None
-            cells[y][x] = (ch, sampled or SHADES.get(ch, ""))
+            # with sampled colors, solid blocks show them in full; shading chars dim them
+            cells[y][x] = ("█", sampled) if sampled else (ch, SHADES.get(ch, ""))
     for y, line in enumerate(ARROW):
         for x, ch in enumerate(line):
             if ch != " ":

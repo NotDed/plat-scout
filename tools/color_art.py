@@ -2,8 +2,8 @@
 
   uv run --with pillow python tools/color_art.py assets/plat.png assets/plat.txt assets/plat-colors.json
 
-The image's transparent background is ignored; colors get a saturation and
-brightness boost because shading characters (░▒▓) only show part of their color.
+The image's transparent background is ignored; colors get a small saturation
+boost. The TUI draws every character of the art as a solid block in its color.
 Delete assets/plat-colors.json to go back to the plain blue shades.
 """
 import json, sys
@@ -24,7 +24,7 @@ x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
 print("coin box", (x0, y0, x1, y1), "image", (w, h))
 
 import colorsys
-SAT, MIN_V, GAMMA = 2.6, 0.62, 0.8
+SAT, MIN_V, GAMMA = 1.3, 0.15, 1.0  # gentle: the TUI draws solid blocks
 
 
 def punch(rgb):

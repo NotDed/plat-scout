@@ -21,7 +21,7 @@ RANKINGS = {  # --by value -> (file suffix, field shown as "score")
     "ducats": ("ducat-candidates.json", "score"),
     "crack": ("candidates.json", "score"),  # relics only: sell vs crack vs refine
 }
-SPECIAL = {"sets": "set-candidates.json"}
+SPECIAL = {"sets": "set-candidates.json", "mastery": "mastery-candidates.json"}
 
 
 def kinds(which):

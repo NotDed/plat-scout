@@ -57,6 +57,49 @@ def save(name, label, rows, done, total):
 
 
 # ---- prime sets ------------------------------------------------------------
+# affinity to reach rank 30 and the mastery points it gives
+MASTERY = {"frame": (900_000, 6000), "weapon": (450_000, 3000)}
+FRAME_TAGS = {"warframe", "archwing", "sentinel", "kubrow", "kavat", "companion"}
+BUILT_SECTIONS = ("Suits", "LongGuns", "Pistols", "Melee", "SpaceSuits", "SpaceGuns",
+                  "SpaceMelee", "Sentinels", "SentinelWeapons", "KubrowPets")
+
+
+def mastery_info():
+    """Affinity per item from the inventory's mastery history, and built gear."""
+    inv = json.load(open(DATA / "inventory.json"))
+    xp = {x["ItemType"]: x.get("XP", 0) for x in inv.get("XPInfo", [])}
+    built = {x["ItemType"] for k in BUILT_SECTIONS for x in inv.get(k, [])}
+    return xp, built
+
+
+def mastery_row(row, root, xp, built):
+    """Mastery-tab version of a set row, or None if it's already mastered."""
+    kind = "frame" if FRAME_TAGS & set(root.get("tags", [])) else "weapon"
+    need, points = MASTERY[kind]
+    have = xp.get(root["gameRef"], 0)
+    if have >= need:
+        return None
+    is_built = root["gameRef"] in built
+    if is_built:
+        action, cost = "you have it built: just level it to 30", 0
+    elif row["complete"]:
+        action, cost = "all parts owned: build it and level it", 0
+    elif row["missingCost"] is not None and row["lowestPrice"] is not None \
+            and row["lowestPrice"] <= row["missingCost"]:
+        # the whole set is no dearer than the missing parts: buy it, keep your parts to sell
+        action, cost = f"buy the full set (~{row['lowestPrice']}p) instead, sell your parts", \
+            row["lowestPrice"]
+    elif row["missingCost"] is not None:
+        action, cost = row["action"].replace("then sell set", "then build it"), row["missingCost"]
+    else:
+        action, cost = row["action"], None
+    return {**row, "action": action, "score": points,
+            # columns: Cost | Your parts (plat you give up) | Full set (buying it outright)
+            "lowestPrice": cost, "bestBuy": 0 if is_built else row["ownedPartsValue"],
+            "averagePrice": row["lowestPrice"], "masteryPoints": points,
+            "affinity": have, "affinityNeeded": need, "built": is_built}
+
+
 def sets():
     market = extract.load_market()
     owned = {e["uniqueName"]: e["count"] for e in json.load(open(DATA / "items.json"))
@@ -79,6 +122,8 @@ def sets():
         if root:
             defs.append((root, [m for m in members if not m.get("setRoot")]))
     print(f"{len(parts)} prime parts owned, part of {len(defs)} sets")
+    xp, built = mastery_info()
+    mastery = []
 
     rows, started = [], time.monotonic()
     for n, (root, members) in enumerate(defs, 1):
@@ -120,8 +165,15 @@ def sets():
         save("set-candidates.json",
              "set price - cost of missing parts - value of your parts sold separately",
              rows, n, len(defs))
+        m = mastery_row(rows[[r["name"] for r in rows].index(name)], root, xp, built)
+        if m:
+            mastery.append(m)
+            mastery.sort(key=lambda r: (r["lowestPrice"] is None, r["lowestPrice"] or 0,
+                                        -r["masteryPoints"]))
+        save("mastery-candidates.json", "unmastered prime sets, cheapest to finish first",
+             mastery, n, len(defs))
     print()
-    print(f"saved {DATA / 'set-candidates.json'}")
+    print(f"saved {DATA / 'set-candidates.json'} and mastery-candidates.json")
 
 
 # ---- relic crack value -----------------------------------------------------

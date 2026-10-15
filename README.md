@@ -36,7 +36,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`5` tabs (mods, arcanes, items, sets, relics), `v` ranking (relics also have "sell or crack"), `c`/`C` sort column / reverse (or click a header), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` tabs (mods, arcanes, items, sets, relics, mastery), `v` ranking (relics also have "sell or crack"), `c`/`C` sort column / reverse (or click a header), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout top [mods\|arcanes]` | print the ranking (`--by market\|owned\|volume`, `-n`, `--quick`) |
 
 `fetch` reads your session token from the game's memory (same method as
@@ -78,6 +78,7 @@ plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
 | File | What |
 |---|---|
 | `set-candidates.json` | prime sets you own parts of: what's missing, its cost, and the gain vs selling parts |
+| `mastery-candidates.json` | prime sets you own parts of but haven't mastered (from your mastery history), cheapest to finish first, with the mastery points each gives |
 | `relic-candidates.json` | per relic: sell price vs expected crack value at each refinement, best action |
 
 Every price comes with the best online **buy order** too: what someone will pay

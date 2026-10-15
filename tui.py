@@ -31,8 +31,10 @@ RANKINGS = {  # key -> (file, score field, label)
     "crack": ("candidates.json", "score", "best of sell / crack / refine, × copies"),
 }
 # tabs with a single ranking of their own, made by extras.py
-SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set")}
-TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics")]
+SPECIAL = {"sets": ("set-candidates.json", "gain from completing the set"),
+           "mastery": ("mastery-candidates.json", "unmastered prime sets, cheapest to finish first")}
+TABS = [("1", "mods"), ("2", "arcanes"), ("3", "items"), ("4", "sets"), ("5", "relics"),
+        ("6", "mastery")]
 RANK_ORDER = [("owned", "your plat"), ("market", "market"), ("volume", "volume"), ("ducats", "ducats")]
 RELIC_RANK_ORDER = [("crack", "sell or crack"), ("owned", "your plat"), ("market", "market"),
                     ("volume", "volume")]
@@ -41,6 +43,7 @@ COLUMNS = {  # header row per tab; the 6th column's field differs
     "default": ("#", "Name", "Score", "Price", "Buy", "Avg", "/day", "Own", "Action"),
     "sets": ("#", "Set", "Gain", "Set", "Buy", "Missing", "/day", "Parts", "Action"),
     "relics": ("#", "Relic", "Total", "Sell", "Buy", "Crack", "/day", "Own", "Best action"),
+    "mastery": ("#", "Set", "MR pts", "Cost", "Your parts", "Full set", "/day", "Parts", "What to do"),
 }
 NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing")
 
@@ -413,6 +416,11 @@ class PlatScout(App):
         if self.kind == "relics" and self.ranking == "crack":
             total = sum(c["score"] for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]following the best action for every relic[/]")
+        elif self.kind == "mastery":
+            pts = sum(c["masteryPoints"] for c in self.rows)
+            cost = sum(c["lowestPrice"] or 0 for c in self.rows)
+            lines.append(f"[b #3ddc84]▲ {pts:,} mastery points[/] [#8a93a6]from {len(self.rows)} sets"
+                         f" for ~{cost:,}p of missing parts[/]")
         elif self.kind == "sets":
             done = sum(1 for c in self.rows if c.get("complete"))
             lines.append(f"[b #3ddc84]▲ {done}[/] [#8a93a6]complete set(s) ready to sell[/]")
@@ -442,6 +450,11 @@ class PlatScout(App):
                     low = "~" + low  # no one online: price from past sales
                 avg = f"{p['average']}p" if p["average"] else "-"
                 extra += f"\n[#8a93a6]{sub:<12}[/] {low:>6} {avg:>6} {p['tradesPerDay']:>6}"
+        if "affinityNeeded" in c:
+            extra += (f"\n[#8a93a6]affinity[/]            {c['affinity']:,} / {c['affinityNeeded']:,}"
+                      f"\n[#8a93a6]mastery points[/]      [b #3ddc84]+{c['masteryPoints']:,}[/]"
+                      f"\n[#5b6680]cost = missing parts · your parts = plat you give up ·"
+                      f" full set = buying it whole[/]")
         if c.get("buyDemand"):
             extra += f"\n[#8a93a6]buyers want now[/]     [#c39bff]{c['buyDemand']}[/]"
         if "sellableIn7Days" in c and "potentialPlat" not in c:
@@ -504,8 +517,8 @@ class PlatScout(App):
 
     def layout(self):
         """Which header row the table uses."""
-        if self.kind == "sets":
-            return "sets"
+        if self.kind in ("sets", "mastery"):
+            return self.kind
         return "relics" if self.kind == "relics" and self.ranking == "crack" else "default"
 
     def action_kind(self, kind):
@@ -588,8 +601,8 @@ class PlatScout(App):
 
     # ---- scanning ---------------------------------------------------------
     def scan_steps(self, kind):
-        if kind == "sets":
-            return [("checking sets", ["extras.py", "sets"])]
+        if kind in ("sets", "mastery"):
+            return [("checking sets & mastery", ["extras.py", "sets"])]
         steps = [(f"scanning {kind}", ["prices.py", str(DATA / f"{kind}.json")])]
         if kind == "relics":  # crack values need the relic prices just scanned
             steps.append(("working out crack values", ["extras.py", "relics"]))
@@ -597,7 +610,7 @@ class PlatScout(App):
 
     @staticmethod
     def source(kind):
-        return DATA / ("items.json" if kind == "sets" else f"{kind}.json")
+        return DATA / ("items.json" if kind in ("sets", "mastery") else f"{kind}.json")
 
     def action_scan(self):
         if not self.source(self.kind).exists():
@@ -607,7 +620,8 @@ class PlatScout(App):
         self.run_steps(self.scan_steps(self.kind))
 
     def action_scan_all(self):
-        steps = [step for _, k in TABS if self.source(k).exists() for step in self.scan_steps(k)]
+        steps = [step for _, k in TABS if k != "mastery" and self.source(k).exists()
+                 for step in self.scan_steps(k)]  # mastery comes from the sets step
         if not steps:
             self.notify("nothing to scan. Press u to update your inventory first.", severity="error")
             return

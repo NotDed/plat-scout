@@ -159,6 +159,8 @@ def watch():
                   and x["user"].get("id") != me_id
                   and x.get("rank") == o.get("rank") and x.get("subtype") == o.get("subtype")]
         lowest = min(others) if others else None
+        cheapest = sorted(others)[:5]  # typical = median of the 5 cheapest other sellers
+        typical = round(cheapest[len(cheapest) // 2]) if cheapest else None
         if not o.get("visible", True):
             status = "hidden"
         elif lowest is None:
@@ -170,9 +172,33 @@ def watch():
         rows.append({"id": o["id"], "name": name, "rank": o.get("rank"), "subtype": o.get("subtype"),
                      "visible": o.get("visible", True),
                      "quantity": o.get("quantity"), "myPrice": o["platinum"], "lowestOther": lowest,
+                     "typicalOther": typical,
                      "undercutBy": o["platinum"] - lowest if status == "undercut" else 0,
                      "status": status, "slug": item.get("slug")})
     return rows
+
+
+def sold_for(row):
+    """Median price this item actually traded at over 90 days (same rank / subtype)."""
+    import prices
+    if not row.get("slug"):
+        return None
+    days = prices.closed_days(row["slug"])
+    sold = prices.sold_price(days, row.get("subtype"), row.get("rank"))
+    return round(sold) if sold else None
+
+
+def presets(row, sold=None):
+    """Price suggestions for editing a listing: [(label, price)], best first."""
+    low = row.get("lowestOther")
+    out = []
+    if low is not None:
+        out += [("Lowest", low), ("Undercut", max(1, low - 1))]
+    if row.get("typicalOther") is not None:
+        out.append(("Typical", row["typicalOther"]))
+    if sold is not None:
+        out.append(("Sold 90d", sold))
+    return out
 
 
 def reprice(row, mode="match"):

@@ -679,7 +679,9 @@ class WatchScreen(ModalScreen):
     """Your warframe.market listings: undercut check, reprice, edit, hide/show."""
     CSS = ReviewScreen.CSS.replace("ReviewScreen", "WatchScreen") + """
     #edit-form { height: auto; display: none; margin: 1 0 0 0; }
+    #edit-form Horizontal { height: auto; }
     #edit-form Input { width: 1fr; border: tall #e3c75b; }
+    #edit-presets Button { width: 1fr; min-width: 12; }
     """
     BINDINGS = [Binding("up", "move(-1)", show=False, priority=True),
                 Binding("down", "move(1)", show=False, priority=True),
@@ -689,18 +691,23 @@ class WatchScreen(ModalScreen):
     STATUS = {"cheapest": "#3ddc84", "undercut": "#ff6b6b", "only seller online": "#3ddc84",
               "hidden": "#5b6680"}
     AUTO_FOCUS = None
-    TYPING_OFF = {"move", "edit", "hide", "reprice", "mode", "refresh"}
+    TYPING_OFF = {"edit", "hide", "reprice", "mode", "refresh"}  # ↑↓ work while editing
 
     def __init__(self):
         super().__init__()
         self.rows, self.mode, self.busy, self.error, self.pick, self.note = [], "match", False, None, 0, ""
+        self.presets, self.preset_i = [], -1
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
             yield Static(id="review-body")
-            with Horizontal(id="edit-form"):
-                yield Input(placeholder="price (p)", id="edit-price", disabled=True)
-                yield Input(placeholder="quantity", id="edit-qty", disabled=True)
+            with Vertical(id="edit-form"):
+                with Horizontal():
+                    yield Input(placeholder="price (p)", id="edit-price", disabled=True)
+                    yield Input(placeholder="quantity", id="edit-qty", disabled=True)
+                with Horizontal(id="edit-presets"):
+                    for n in range(4):
+                        yield Button("", id=f"preset-{n}")
 
     def on_mount(self):
         self.load()
@@ -751,9 +758,51 @@ class WatchScreen(ModalScreen):
         return self.rows[self.pick] if self.rows and 0 <= self.pick < len(self.rows) else None
 
     def action_move(self, step):
+        focused = self.focused
+        if isinstance(focused, Input):  # editing: ↑↓ cycle price presets / change quantity
+            if focused.id == "edit-price" and self.presets:
+                self.preset_i = (self.preset_i - step) % len(self.presets)  # ↑ next preset, ↓ previous
+                self.use_preset(self.preset_i)
+            elif focused.id == "edit-qty":
+                try:
+                    focused.value = str(max(1, int(focused.value or 1) - step))
+                except ValueError:
+                    focused.value = "1"
+            return
         if self.rows:
             self.pick = (self.pick + step) % len(self.rows)
             self.draw()
+
+    def show_presets(self):
+        for n in range(4):
+            b = self.query_one(f"#preset-{n}", Button)
+            if n < len(self.presets):
+                label, price = self.presets[n]
+                b.label, b.display = f"{label} {price}p", True
+            else:
+                b.display = False
+
+    def use_preset(self, n):
+        if 0 <= n < len(self.presets):
+            box = self.query_one("#edit-price", Input)
+            box.value = str(self.presets[n][1])
+            box.cursor_position = len(box.value)
+            self.preset_i = n
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id and event.button.id.startswith("preset-"):
+            self.use_preset(int(event.button.id.split("-")[1]))
+            self.query_one("#edit-price", Input).focus()
+
+    @work(exclusive=True, thread=True, group="sold")
+    def fetch_sold(self, row):
+        try:
+            sold = listing.sold_for(row)
+        except Exception:
+            return
+        if sold is not None and self.current() is row:
+            self.presets = listing.presets(row, sold)
+            self.app.call_from_thread(self.show_presets)
 
     def action_mode(self):
         self.mode = "undercut" if self.mode == "match" else "match"
@@ -773,8 +822,12 @@ class WatchScreen(ModalScreen):
         price.value, qty.value = str(r["myPrice"]), str(r["quantity"] or 1)
         for box in (price, qty):
             box.disabled = False
+        self.presets, self.preset_i = listing.presets(r), -1
+        self.show_presets()
+        self.fetch_sold(r)  # adds "Sold 90d" when it arrives
         self.query_one("#edit-form").display = True
-        self.note = f"[#e3c75b]editing {r['name']}: Tab between fields, Enter saves, Esc cancels[/]"
+        self.note = (f"[#e3c75b]editing {r['name']}: presets below or ↑↓ in the price box ·"
+                     " Tab to quantity (↑↓ ±1) · Enter saves · Esc cancels[/]")
         self.draw()
         price.focus()
 

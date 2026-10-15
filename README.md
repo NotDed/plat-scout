@@ -67,7 +67,10 @@ verified on warframe.market to create orders.
 
 Press `w` for **My listings**: each of your sell orders vs the cheapest *other*
 online seller of the same item, rank and subtype. `↑↓` choose a listing, `e`
-edits its price and quantity (Enter saves), `h` hides / shows it, `y` reprices
+edits its price and quantity with presets (**Lowest**, **Undercut** 1p,
+**Typical** = median of the 5 cheapest other sellers, **Sold 90d** = median of
+real trades; click one or `↑↓` in the price box, `↑↓` in quantity = ±1, Enter
+saves), `h` hides / shows it, `y` reprices
 every undercut one (match the cheapest, or `p` for 1p under), `r` refreshes.
 
 **Status:** whenever plat-scout posts, edits, shows or reprices a listing, it

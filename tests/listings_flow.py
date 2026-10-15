@@ -14,7 +14,8 @@ import tui  # noqa: E402
 
 ORDERS = [
     {"id": "o1", "name": "Lethal Momentum", "rank": 0, "subtype": None, "visible": True, "quantity": 2,
-     "myPrice": 5, "lowestOther": 5, "undercutBy": 0, "status": "cheapest", "slug": "lethal_momentum"},
+     "myPrice": 5, "lowestOther": 5, "typicalOther": 6, "undercutBy": 0, "status": "cheapest",
+     "slug": "lethal_momentum"},
     {"id": "o2", "name": "Axi A22 Relic", "rank": None, "subtype": "intact", "visible": True, "quantity": 9,
      "myPrice": 8, "lowestOther": 5, "undercutBy": 3, "status": "undercut", "slug": "axi_a22_relic"},
     {"id": "o3", "name": "Chilling Claws", "rank": 5, "subtype": None, "visible": False, "quantity": 7,
@@ -22,6 +23,7 @@ ORDERS = [
 ]
 calls, ingame = [], []
 listing.watch = lambda: [dict(o) for o in ORDERS]
+listing.sold_for = lambda row: 4
 listing.edit_order = lambda oid, **f: calls.append(("edit", oid, f))
 listing.apply_reprice = lambda r, price: calls.append(("reprice", r["id"], price))
 listing.log = lambda *a, **k: None
@@ -57,6 +59,23 @@ async def main():
         await pilot.pause()
         print("edit form open, focus:", type(app.focused).__name__, "| prefilled:",
               scr.query_one("#edit-price").value, scr.query_one("#edit-qty").value)
+        await asyncio.sleep(0.3)
+        await pilot.pause()
+        labels = [str(b.label) for b in scr.query("#edit-presets Button") if b.display]
+        print("preset buttons:", labels)
+        await pilot.press("up")
+        await pilot.pause()
+        print("↑ in price ->", scr.query_one("#edit-price").value, "| ↑ again ->", end=" ")
+        await pilot.press("up")
+        await pilot.pause()
+        print(scr.query_one("#edit-price").value)
+        await pilot.click("#preset-2")
+        await pilot.pause()
+        print("click Typical ->", scr.query_one("#edit-price").value)
+        await pilot.press("tab", "down")
+        await pilot.pause()
+        print("↓ in quantity ->", scr.query_one("#edit-qty").value)
+        await pilot.press("shift+tab")
         scr.query_one("#edit-price").value = "7"
         await pilot.press("tab")
         scr.query_one("#edit-qty").value = "1"

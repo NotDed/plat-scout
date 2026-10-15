@@ -61,6 +61,22 @@ def sound_for(kind):
     return path, max(1, int(times))
 
 
+LABELS = {"message": "seller answered / someone whispered you",
+          "done": "trade done", "bell": "seller hasn't answered"}
+
+
+def available_sounds():
+    """Sound files on this system to choose from."""
+    return sorted(p.name for p in SOUND_DIR.glob("*.og[ag]")) if SOUND_DIR.exists() else []
+
+
+def set_sound(kind, name, times):
+    s = settings()
+    s.setdefault("sounds", {})[kind] = [name, max(1, min(5, int(times)))]
+    DATA.mkdir(exist_ok=True)
+    SETTINGS.write_text(json.dumps(s, indent=2))
+
+
 def play(kind):
     """Play the sound for this kind of alert; False if no player could."""
     sound, times = sound_for(kind)

@@ -37,7 +37,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `m` mute alerts, `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `m` mute alerts, `,` alert sounds, `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout plan` | day-by-day trade plan (see below), no new price scan |
 | `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
@@ -109,7 +109,9 @@ While the TUI is open it follows Warframe's `EE.log` (read-only; set
 Sounds play with `pw-play`/`paplay`, notifications use `notify-send`; `m` mutes /
 unmutes. Defaults: an answer or a whisper rings `phone-incoming-call` twice, a
 finished trade plays `service-login`, no answer plays `dialog-warning` twice.
-Preview with `plat-scout sound message|done|bell`; change them in
+Change them in the TUI with `,` (**Sounds**: ↑↓ pick the alert, ←→ cycle through
+every sound on your system with a preview, +/− how many times it plays), preview
+from a terminal with `plat-scout sound message|done|bell`, or edit
 `data/settings.json`, e.g. `{"sounds": {"message": ["alarm-clock-elapsed.oga", 1]}}`
 (any name from `/usr/share/sounds/freedesktop/stereo/` or a full path). The game doesn't log the *text* of whispers
 you receive, only that a conversation started.

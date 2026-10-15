@@ -454,6 +454,75 @@ class AddScreen(ModalScreen):
         self.dismiss({"item": i, "rank": rank, "subtype": sub, "qty": qty, "max": max_price})
 
 
+class SoundScreen(ModalScreen):
+    """Pick the sound and how many times it plays for each alert."""
+    CSS = ReviewScreen.CSS.replace("ReviewScreen", "SoundScreen")
+    BINDINGS = [Binding("up", "move(-1)", show=False, priority=True),
+                Binding("down", "move(1)", show=False, priority=True),
+                Binding("left", "sound(-1)", show=False, priority=True),
+                Binding("right", "sound(1)", show=False, priority=True),
+                Binding("plus,equals_sign", "times(1)", show=False),
+                Binding("minus", "times(-1)", show=False),
+                Binding("enter", "preview", show=False, priority=True),
+                Binding("m", "mute", show=False),
+                Binding("escape", "dismiss", "Close")]
+    KINDS = ["message", "done", "bell"]
+
+    def __init__(self):
+        super().__init__()
+        self.pick, self.sounds = 0, alerts.available_sounds()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="review"):
+            yield Static(id="review-body")
+
+    def on_mount(self):
+        self.draw()
+
+    def draw(self):
+        lines = ["[b #e8eefc]Alert sounds[/]   " + ("[#ff6b6b]🔕 muted[/]" if alerts.muted() else "[#3ddc84]🔔 on[/]"), ""]
+        for n, kind in enumerate(self.KINDS):
+            path, times = alerts.sound_for(kind)
+            mark = "[reverse b #9fd8ff]" if n == self.pick else ""
+            end = "[/]" if mark else ""
+            lines.append(f"{mark} {alerts.LABELS[kind]:<40} {path.stem:<28} ×{times} {end}")
+        lines += ["", "[#8a93a6]↑↓ choose · ←→ change sound (plays it) · + / − times · Enter play"
+                      " · m mute · Esc close[/]"]
+        if not self.sounds:
+            lines.append("[#ff6b6b]no sound theme found in /usr/share/sounds/freedesktop/stereo[/]")
+        self.query_one("#review-body", Static).update(markup("\n".join(lines)))
+
+    def kind(self):
+        return self.KINDS[self.pick]
+
+    def action_move(self, step):
+        self.pick = (self.pick + step) % len(self.KINDS)
+        self.draw()
+
+    def action_sound(self, step):
+        if not self.sounds:
+            return
+        path, times = alerts.sound_for(self.kind())
+        i = self.sounds.index(path.name) if path.name in self.sounds else -1
+        alerts.set_sound(self.kind(), self.sounds[(i + step) % len(self.sounds)], times)
+        self.draw()
+        self.action_preview()
+
+    def action_times(self, step):
+        path, times = alerts.sound_for(self.kind())
+        alerts.set_sound(self.kind(), path.name if path.parent == alerts.SOUND_DIR else str(path),
+                         times + step)
+        self.draw()
+
+    def action_preview(self):
+        if not alerts.play(self.kind()):
+            self.app.bell()
+
+    def action_mute(self):
+        alerts.set_muted(not alerts.muted())
+        self.draw()
+
+
 class CloseSoldScreen(ModalScreen):
     """After a sale in game: close those copies on warframe.market? Only on y."""
     CSS = ReviewScreen.CSS.replace("ReviewScreen", "CloseSoldScreen")
@@ -659,6 +728,7 @@ class PlatScout(App):
         Binding("b", "buy_bought", "Bought"),
         Binding("delete", "buy_remove", "Remove from cart"),
         Binding("m", "toggle_mute", "Mute alerts", show=False),
+        Binding("comma", "sounds", "Sounds"),
         Binding("s", "scan", "Scan tab"),
         Binding("S", "scan_all", "Scan all", show=False),
         Binding("u", "update_inventory", "Update inventory"),
@@ -909,6 +979,9 @@ class PlatScout(App):
                                 f"{x['name']}: press > for the next seller")
                 self.load_if_buy()
 
+    def action_sounds(self):
+        self.push_screen(SoundScreen(), lambda _: self.draw_headline())
+
     def action_toggle_mute(self):
         alerts.set_muted(not alerts.muted())
         self.notify("alerts muted" if alerts.muted() else "alerts on")
@@ -920,7 +993,7 @@ class PlatScout(App):
         log = "game log: watching" if self.game and self.game.exists() else "game log not found"
         now = time.time()
         chats = " · ".join(f"💬 {n} {int((now - t) // 60)}m ago" for n, t in self.whispers)
-        return (f"[#8a93a6]{bell} [#e3c75b]m[/] · {log}[/]"
+        return (f"[#8a93a6]{bell} [#e3c75b]m[/] mute · [#e3c75b],[/] sounds · {log}[/]"
                 + (f"  [b #c39bff]{chats}[/]" if chats else ""))
 
     def current_buy_row(self):

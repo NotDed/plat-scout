@@ -39,28 +39,30 @@ async def main():
     app = tui.PlatScout()
     async with app.run_test(size=(170, 48)) as pilot:
         await pilot.pause()
-        ready = [c["name"] for c in app.rows if listing.SELLABLE.match(c["action"])]
-        print("mods tab: rows", len(app.rows), "| sellable as-is:", len(ready), "| first 3:", ready[:3])
         await pilot.press("L")
         await pilot.pause()
-        box = app.screen.query_one("#count-n")
-        print("prompt:", type(app.screen).__name__, "| default:", box.value)
-        box.value = "3"
+        scr = app.screen
+        print("prompt:", type(scr).__name__, "| ticked:", scr.chosen(), "| default N:",
+              scr.query_one("#count-n").value)
+        print("info:", str(scr.query_one("#count-info").render()))
+        await pilot.click("#src-relics")
+        await pilot.pause()
+        print("after ticking relics:", scr.chosen(), "|", str(scr.query_one("#count-info").render()))
+        scr.query_one("#count-n").value = "8"
+        scr.query_one("#count-n").focus()
         await pilot.press("enter")
         await until(pilot, lambda: getattr(app.screen, "plans", None))
-        scr = app.screen
-        print("review:", scr.title, "| rows:", [p["name"] for p in scr.plans],
-              "| all postable:", all("order" in p for p in scr.plans))
-        print("posted before y:", posted)
+        rev = app.screen
+        print("review:", rev.title)
+        for c in rev.rows:
+            print(f"   {c['category']:<8} {c['listValue']:>5}p  {c['name']}")
+        print("all postable:", all("order" in p for p in rev.plans), "| posted before y:", posted)
         await pilot.press("y")
-        await until(pilot, lambda: len(posted) >= 3 and ingame)
-        print("posted after y:", posted, "| set in game:", bool(ingame))
+        await until(pilot, lambda: len(posted) >= 8 and ingame)
+        print("posted after y:", len(posted), "| set in game:", bool(ingame))
         await pilot.press("escape")
         await pilot.pause()
-        print("remembered N:", alerts.settings().get("listBest"))
-        await pilot.press("6", "L")
-        await pilot.pause()
-        print("on the buy tab L does nothing:", type(app.screen).__name__)
+        print("remembered:", alerts.settings().get("listBest"), alerts.settings().get("listBestKinds"))
         print("LIST BEST OK")
     shutil.rmtree(TMP)
 

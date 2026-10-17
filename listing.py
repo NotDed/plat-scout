@@ -112,6 +112,8 @@ def plan(rows, pricing="match"):
             refined = re.search(r"\((exceptional|flawless|radiant)\)$", c["name"])
             subtype = refined[1] if refined else item["subtypes"][0]
         low, avg = c.get("lowestPrice"), c.get("averagePrice")
+        if low is None and c.get("expectedPrice"):
+            low = round(c["expectedPrice"])  # nobody online selling: use what it actually sells for
         if "crackValue" in c:  # relic tab: averagePrice is crack value, not a price
             avg = None
         sold = c.get("soldAvg")

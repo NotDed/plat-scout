@@ -19,7 +19,7 @@ from textual.suggester import Suggester
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual import work
-from textual.widgets import Button, DataTable, Footer, Input, ProgressBar, Static
+from textual.widgets import Button, Checkbox, DataTable, Footer, Input, ProgressBar, Static
 
 import alerts
 import buying
@@ -201,31 +201,79 @@ def trend_text(t):
     return Text(f"{arrow}{abs(t['pricePct'])}%", style=color, justify="right")
 
 
+# what "List best N" can draw from: key -> (label, ranking file)
+LIST_SOURCES = {
+    "mods": ("Mods", "sell-candidates-owned.json"),
+    "arcanes": ("Arcanes", "arcane-sell-candidates-owned.json"),
+    "items": ("Items & blueprints", "item-sell-candidates-owned.json"),
+    "relics": ("Relics", "relic-sell-candidates-owned.json"),
+    "sets": ("Complete prime sets", "set-candidates.json"),
+}
+LIST_DEFAULT = ["mods", "arcanes", "items"]
+
+
+def sellable_pool(kinds):
+    """Rows you can list as they are, from the chosen categories, best plat first."""
+    pool = []
+    for kind in kinds:
+        try:
+            rows = json.loads((DATA / LIST_SOURCES[kind][1]).read_text())["candidates"]
+        except (OSError, ValueError, KeyError):
+            continue
+        for c in rows:
+            if kind == "sets" and not c.get("complete"):
+                continue
+            if listing.SELLABLE.match(c["action"]):
+                plat = c.get("potentialPlat") if kind != "sets" else c.get("lowestPrice")
+                pool.append({**c, "category": kind, "listValue": plat or 0})
+    pool.sort(key=lambda c: -c["listValue"])
+    return pool
+
+
 class CountScreen(ModalScreen):
-    """Ask how many of the best items to list."""
+    """List best N: how many, and from which categories."""
     CSS = """
     CountScreen { align: center middle; background: #0b0f17 70%; }
-    #count { width: 64; height: auto; border: round #3ddc84; background: #0f1522; padding: 1 2; }
+    #count { width: 72; height: auto; border: round #3ddc84; background: #0f1522; padding: 1 2; }
     #count Input { border: tall #e3c75b; }
+    #count Checkbox { border: none; padding: 0; background: #0f1522; }
     """
     BINDINGS = [Binding("escape", "dismiss", "Cancel")]
 
-    def __init__(self, default, available, where):
+    def __init__(self, default, kinds):
         super().__init__()
-        self.default, self.available, self.where = default, available, where
+        self.default, self.kinds = default, kinds
 
     def compose(self) -> ComposeResult:
         with Vertical(id="count"):
-            yield Static(markup(f"[b #e8eefc]List the best items[/]  [#8a93a6]{self.available} ready to"
-                                f" sell in {self.where}, in the current order[/]"))
-            yield Input(value=str(min(self.default, self.available)), placeholder="how many",
-                        id="count-n")
-            yield Static(markup("[#8a93a6]Enter → review them before anything is posted · Esc cancels[/]"))
+            yield Static(markup("[b #e8eefc]List the best items[/]  [#8a93a6]ranked by plat from your"
+                                " copies, only what can be sold as it is[/]"))
+            for key, (label, _) in LIST_SOURCES.items():
+                yield Checkbox(label, key in self.kinds, id=f"src-{key}")
+            yield Static(id="count-info")
+            yield Input(value=str(self.default), placeholder="how many", id="count-n")
+            yield Static(markup("[#8a93a6]Tab / click to tick categories (space toggles) ·"
+                                " Enter → review before anything is posted · Esc cancels[/]"))
 
     def on_mount(self):
+        self.update_info()
         box = self.query_one("#count-n", Input)
         box.focus()
         box.cursor_position = len(box.value)
+
+    def chosen(self):
+        return [k for k in LIST_SOURCES if self.query_one(f"#src-{k}", Checkbox).value]
+
+    def update_info(self):
+        pool = sellable_pool(self.chosen())
+        by = {k: sum(1 for c in pool if c["category"] == k) for k in self.chosen()}
+        detail = " · ".join(f"{LIST_SOURCES[k][0].lower()} {n}" for k, n in by.items())
+        self.query_one("#count-info", Static).update(markup(
+            f"[#8a93a6]{len(pool)} ready to list[/]" + (f" [#5b6680]({detail})[/]" if detail else "")))
+
+    def on_checkbox_changed(self, event: Checkbox.Changed):
+        event.stop()
+        self.update_info()
 
     def on_input_changed(self, event: Input.Changed):
         event.stop()
@@ -238,7 +286,10 @@ class CountScreen(ModalScreen):
         except (ValueError, AssertionError):
             self.notify("type a whole number, at least 1", severity="error")
             return
-        self.dismiss(n)
+        if not self.chosen():
+            self.notify("tick at least one category", severity="error")
+            return
+        self.dismiss((n, self.chosen()))
 
 
 class ReviewScreen(ModalScreen):
@@ -1813,24 +1864,28 @@ class PlatScout(App):
             table.move_cursor(row=min(row + 1, len(self.rows) - 1))
 
     def action_list_best(self):
-        """L: the top N rows you can sell as they are, in the current order, then review."""
-        ready = [c for c in self.rows if listing.SELLABLE.match(c["action"])]
-        if not ready:
-            self.notify("nothing here can be listed as it is (press f to see sell-now rows)",
-                        severity="warning")
-            return
-        default = int(alerts.settings().get("listBest", 10))
+        """L: the best N things you can sell as they are, across the categories you
+        tick (remembered), then the usual review."""
+        settings = alerts.settings()
+        default = int(settings.get("listBest", 10))
+        kinds = [k for k in settings.get("listBestKinds", LIST_DEFAULT) if k in LIST_SOURCES]
 
-        def chosen(n):
-            if not n:
+        def chosen(result):
+            if not result:
                 return
+            n, kinds = result
             s = alerts.settings()
-            s["listBest"] = n
+            s["listBest"], s["listBestKinds"] = n, kinds
             alerts.save_settings(s)
-            rows = ready[:n]
-            self.push_screen(ReviewScreen(rows, f"List the best {len(rows)} from {self.kind}"),
+            rows = sellable_pool(kinds)[:n]
+            if not rows:
+                self.notify("nothing in those categories can be listed as it is — scan them first",
+                            severity="warning")
+                return
+            names = ", ".join(LIST_SOURCES[k][0].lower() for k in kinds)
+            self.push_screen(ReviewScreen(rows, f"List the best {len(rows)} ({names})"),
                              lambda _: self.reset_selection())
-        self.push_screen(CountScreen(default, len(ready), self.kind), chosen)
+        self.push_screen(CountScreen(default, kinds), chosen)
 
     def action_list_selected(self):
         table = self.query_one(DataTable)

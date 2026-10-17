@@ -59,9 +59,12 @@ Nothing is posted without that review.
 
 Only rows you can sell as-is are listed (not "rank to…", "refine…", "buy…").
 
-`L` (**List best N**) asks how many, takes the top N rows of the current tab
-that can be sold as they are (current ranking, sort and filters), and opens the
-same review: nothing is posted until you press `y`. The last N is remembered.
+`L` (**List best N**) asks how many and which categories to draw from (mods,
+arcanes, items & blueprints, relics, complete prime sets — tick boxes), pools
+everything that can be sold as it is, ranks it by plat from your copies, and
+opens the same review with the top N: nothing is posted until you press `y`.
+N and the ticked categories are remembered. If nobody online is selling an
+item, its price comes from what it actually sold for.
 
 First time it asks for your warframe.market session token: log in on
 warframe.market in your browser, F12 → Application/Storage → Cookies →

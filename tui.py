@@ -65,7 +65,7 @@ PLAT_FIELDS = {"potential", "lowestPrice", "bestBuy", "averagePrice", "missingCo
 FIELD_STYLE = {"potential": "bold #8fe3b0", "lowestPrice": "#9fd8ff", "bestBuy": "#c39bff",
                "averagePrice": "#6f87a8", "missingCost": "#6f87a8", "expectedPrice": "#9fd8ff"}
 WEEK = 7
-NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing")
+NEEDS_WORK = ("rank to", "fuse", "refine", "buy ", "missing", "keep:")
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 SHADES = {"░": "#2b4a6b", "▒": "#5f8fbf", "▓": "#a8d8ff", "█": "#ffffff"}
@@ -1602,7 +1602,10 @@ class PlatScout(App):
             lines.append(f"[b #3ddc84]▲ {done}[/] [#8a93a6]complete set(s) ready to sell[/]")
         elif self.ranking == "ducats":
             total = sum(c["score"] for c in self.rows)
-            lines.append(f"[b #e3c75b]◆ {total:,} ducats[/] [#8a93a6]from {len(self.rows)} parts[/]")
+            safe = sum(1 for c in self.rows if c["score"])
+            kept = len(self.rows) - safe
+            lines.append(f"[b #e3c75b]◆ {total:,} ducats[/] [#8a93a6]from {safe} parts safe to give up"
+                         + (f" · {kept} kept for sets[/]" if kept else "[/]"))
         elif self.ranking == "owned":
             total = sum(c.get("potentialPlat", 0) for c in self.rows)
             lines.append(f"[b #3ddc84]▲ ~{total:,}p[/] [#8a93a6]you could make from the {len(self.rows)} listed[/]")

@@ -172,7 +172,10 @@ takes to sell everything.
 
 Arcanes, items and relics produce the same files with an `arcane-` / `item-` /
 `relic-` prefix,
-plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro.
+plus `ducat-candidates.json`: prime parts worth ≥10 ducats per plat at Baro and
+safe to give up. The plat value is the better of what the part sells for and the
+best buy order; parts of a set worth finishing (or of a complete set), vaulted
+parts that are rising, and parts with no price data are kept and say why.
 
 | File | What |
 |---|---|

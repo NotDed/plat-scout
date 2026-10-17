@@ -294,28 +294,65 @@ def volume_candidates(results):
 DUCAT_RATIO = 10  # Baro rule of thumb: ~10 ducats per plat is a fair trade
 
 
-def ducat_candidates(results):
-    """Prime parts worth more as ducats (Baro Ki'Teer) than as plat."""
-    out = []
+def load_sets(out_dir):
+    """Part name -> prime sets it belongs to (from set-candidates.json, if scanned)."""
+    try:
+        sets = json.load(open(out_dir / "set-candidates.json"))["candidates"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    part_of = {}
+    for st in sets:
+        for p in st.get("parts", []):
+            part_of.setdefault(p["name"], []).append(st)
+    return part_of
+
+
+def ducat_candidates(results, part_of=None):
+    """Prime parts worth more as ducats (Baro Ki'Teer) than as plat, and safe to give up.
+
+    Plat value = the better of what it sells for and the best buy order. A part is
+    kept (not suggested) when it belongs to a set you're close to that's worth
+    finishing, or to a complete set, when it's vaulted and rising, or when there's
+    no price data at all to judge it."""
+    part_of = part_of or {}
+    safe, keep = [], []
     for r in results:
-        ducats, price = r.get("ducats", 0), expected_price(r["rank0"])
+        ducats = r.get("ducats", 0)
         if not ducats or not r["ownedRank0"]:
             continue
-        ratio = ducats / price if price else None
-        if ratio is not None and ratio < DUCAT_RATIO:
+        a = r["rank0"]
+        value = max(expected_price(a) or 0, a.get("bestBuy") or 0) or None
+        if value is None:
+            continue  # no sales, no sellers, no buyers: can't tell it's junk
+        ratio = ducats / value
+        if ratio < DUCAT_RATIO:
             continue
-        out.append({"name": r["name"],
-                    "action": f"trade to Baro: {ducats} ducats each"
-                              + (f" ({ratio:.0f} ducats per plat)" if ratio else " (no one selling)"),
-                    "lowestPrice": price, "averagePrice": r["rank0"]["average"],
-                    "bestBuy": r["rank0"].get("bestBuy"),
-                    "tradesPerDay": r["rank0"]["tradesPerDay"],
-                    "onlineSellers": r["rank0"]["sellers"], "yourCopies": r["ownedRank0"],
-                    "ducats": ducats, "score": ducats * r["ownedRank0"],
-                    "trend": r["rank0"].get("trend"), "vaulted": r.get("vaulted", False),
-                    "url": f"https://warframe.market/items/{r['slug']}"})
-    out.sort(key=lambda c: -c["score"])
-    return out
+        row = {"name": r["name"], "lowestPrice": value, "averagePrice": a["average"],
+               "bestBuy": a.get("bestBuy"), "tradesPerDay": a["tradesPerDay"],
+               "onlineSellers": a["sellers"], "yourCopies": r["ownedRank0"], "ducats": ducats,
+               "trend": a.get("trend"), "vaulted": r.get("vaulted", False),
+               "url": f"https://warframe.market/items/{r['slug']}"}
+        rising = (a.get("trend") or {}).get("signal") == "rising"
+        sets = part_of.get(r["name"], [])
+        worth = [st for st in sets if st.get("complete") or (st.get("score") or 0) > 0]
+        if worth:
+            st = max(worth, key=lambda st: st.get("score") or 0)
+            why = (f"keep: completes your full {st['name']} (sells for {st.get('lowestPrice')}p)"
+                   if st.get("complete") else f"keep: {st['name']} gains +{st['score']}p if completed")
+            keep.append({**row, "action": why, "score": 0})
+            continue
+        if r.get("vaulted") and rising:
+            keep.append({**row, "action": "keep: vaulted and rising in price", "score": 0})
+            continue
+        if sets:
+            st = sets[0]
+            reason = f"{st['name']} loses {abs(st.get('score') or 0)}p if completed"
+        else:
+            reason = "not part of a set you're building"
+        safe.append({**row, "score": ducats * r["ownedRank0"],
+                     "action": f"trade to Baro: {ducats} ducats each ({ratio:.0f} per plat) · safe: {reason}"})
+    safe.sort(key=lambda c: -c["score"])
+    return safe + keep  # safe ones first; kept ones listed with the reason
 
 
 def write_candidates(out_dir, results, progress_text, prefix=""):
@@ -334,8 +371,8 @@ def write_candidates(out_dir, results, progress_text, prefix=""):
         "candidates": volume_candidates(results)})
     write_json(out_dir / f"{prefix}ducat-candidates.json", {
         "updated": now, "progress": progress_text,
-        "score": f"total ducats (parts worth >= {DUCAT_RATIO} ducats per plat)",
-        "candidates": ducat_candidates(results)})
+        "score": f"total ducats (parts worth >= {DUCAT_RATIO} ducats per plat, safe to give up)",
+        "candidates": ducat_candidates(results, load_sets(out_dir))})
 
 
 def sell_now_worth(results):

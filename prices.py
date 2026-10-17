@@ -152,7 +152,7 @@ def progress(n, total, label, started):
 
 MIN_PRICE = 5          # ignore candidates worth less than this (plat)
 MIN_TRADES = 0.3       # ignore candidates trading less than this per day
-TOP = 50               # how many candidates to keep in sell-candidates.json
+TOP = 250              # how many candidates to keep in each ranking file
 WEEK = 7               # sell-candidates-owned.json: copies the market absorbs in this many days
 
 

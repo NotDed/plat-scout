@@ -201,6 +201,46 @@ def trend_text(t):
     return Text(f"{arrow}{abs(t['pricePct'])}%", style=color, justify="right")
 
 
+class CountScreen(ModalScreen):
+    """Ask how many of the best items to list."""
+    CSS = """
+    CountScreen { align: center middle; background: #0b0f17 70%; }
+    #count { width: 64; height: auto; border: round #3ddc84; background: #0f1522; padding: 1 2; }
+    #count Input { border: tall #e3c75b; }
+    """
+    BINDINGS = [Binding("escape", "dismiss", "Cancel")]
+
+    def __init__(self, default, available, where):
+        super().__init__()
+        self.default, self.available, self.where = default, available, where
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="count"):
+            yield Static(markup(f"[b #e8eefc]List the best items[/]  [#8a93a6]{self.available} ready to"
+                                f" sell in {self.where}, in the current order[/]"))
+            yield Input(value=str(min(self.default, self.available)), placeholder="how many",
+                        id="count-n")
+            yield Static(markup("[#8a93a6]Enter → review them before anything is posted · Esc cancels[/]"))
+
+    def on_mount(self):
+        box = self.query_one("#count-n", Input)
+        box.focus()
+        box.cursor_position = len(box.value)
+
+    def on_input_changed(self, event: Input.Changed):
+        event.stop()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        event.stop()
+        try:
+            n = int(event.value)
+            assert n >= 1
+        except (ValueError, AssertionError):
+            self.notify("type a whole number, at least 1", severity="error")
+            return
+        self.dismiss(n)
+
+
 class ReviewScreen(ModalScreen):
     """Shows exactly what would be listed on warframe.market; posts only on y."""
     CSS = """
@@ -213,9 +253,10 @@ class ReviewScreen(ModalScreen):
     BINDINGS = [Binding("y", "post", "Post"), Binding("p", "pricing", "Pricing"),
                 Binding("escape", "dismiss", "Cancel")]
 
-    def __init__(self, rows):
+    def __init__(self, rows, title="Post to warframe.market"):
         super().__init__()
         self.rows, self.pricing, self.plans, self.user, self.busy = rows, "match", [], None, False
+        self.title = title
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
@@ -248,7 +289,7 @@ class ReviewScreen(ModalScreen):
             self.set_focus(None)  # so y / p / esc reach this screen, not a text box
         who = (f"[b #3ddc84]{self.user.get('ingameName', '?')}[/]" if self.user
                else "[#ff6b6b]not logged in[/] [#8a93a6]- paste your token below[/]")
-        lines = [f"[b #e8eefc]Post to warframe.market[/]   as {who}",
+        lines = [f"[b #e8eefc]{self.title}[/]   as {who}",
                  f"[#8a93a6]pricing:[/] [b #e3c75b]{listing.PRICING[self.pricing]}[/]"
                  f" [#5b6680](p to change)[/]",
                  "", f"[b #9fd8ff]{'item':<34} {'rank':>4} {'qty':>4} {'price':>7}  what happens[/]"]
@@ -959,6 +1000,7 @@ class PlatScout(App):
         Binding("o", "open", "Open market"),
         Binding("space", "toggle_select", "Select", show=False),
         Binding("l", "list_selected", "List on market"),
+        Binding("L", "list_best", "List best N"),
         Binding("w", "watch", "My listings"),
         Binding("a", "buy_add", "Add to cart"),
         Binding("greater_than_sign", "buy_next", "Next seller"),
@@ -1648,7 +1690,7 @@ class PlatScout(App):
         if action.startswith("buy_"):
             return self.kind == "buy"
         if self.kind == "buy" and action in ("next_ranking", "toggle_quick", "toggle_select",
-                                             "list_selected", "scan_all"):
+                                             "list_selected", "list_best", "scan_all"):
             return False
         return True
 
@@ -1769,6 +1811,26 @@ class PlatScout(App):
             row = table.cursor_row
             self.refresh_view()
             table.move_cursor(row=min(row + 1, len(self.rows) - 1))
+
+    def action_list_best(self):
+        """L: the top N rows you can sell as they are, in the current order, then review."""
+        ready = [c for c in self.rows if listing.SELLABLE.match(c["action"])]
+        if not ready:
+            self.notify("nothing here can be listed as it is (press f to see sell-now rows)",
+                        severity="warning")
+            return
+        default = int(alerts.settings().get("listBest", 10))
+
+        def chosen(n):
+            if not n:
+                return
+            s = alerts.settings()
+            s["listBest"] = n
+            alerts.save_settings(s)
+            rows = ready[:n]
+            self.push_screen(ReviewScreen(rows, f"List the best {len(rows)} from {self.kind}"),
+                             lambda _: self.reset_selection())
+        self.push_screen(CountScreen(default, len(ready), self.kind), chosen)
 
     def action_list_selected(self):
         table = self.query_one(DataTable)

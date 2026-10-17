@@ -37,7 +37,7 @@ Step by step:
 | `plat-scout extract` | split it into `mods.json`, `arcanes.json`, `relics.json` and `items.json` |
 | `plat-scout prices [mods\|arcanes\|items\|relics]` | scan warframe.market (~2.3 s per item) |
 | `plat-scout rank` | rebuild rankings from saved prices, no API calls |
-| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `m` mute alerts, `,` alert sounds, `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
+| `plat-scout tui` | browse everything: `1`-`6` or `←`/`→` tabs (mods, arcanes, items, sets, relics, buy), `w` my listings (undercut check), `m` mute alerts, `,` alert sounds, `v` ranking (relics also have "sell or crack"), multi-column sort (click headers to add a level, again to flip, a third time to remove; or `n` add level, `c` change its column, `C` flip, `Backspace` remove, `r` reset), `f` sell-now only, `/` search, `o` open on warframe.market, `space`/`l` select & list, `L` list best N, `u` update inventory, `s`/`S` scan tab / all, `x` stop |
 | `plat-scout plan` | day-by-day trade plan (see below), no new price scan |
 | `plat-scout top [mods\|arcanes\|items\|relics\|sets\|trades]` | print a ranking (`--by market\|owned\|volume\|ducats`, `-n`, `--quick`) |
 
@@ -58,6 +58,10 @@ undercutting it by 1p, or the online average. `y` posts, `esc` cancels.
 Nothing is posted without that review.
 
 Only rows you can sell as-is are listed (not "rank to…", "refine…", "buy…").
+
+`L` (**List best N**) asks how many, takes the top N rows of the current tab
+that can be sold as they are (current ranking, sort and filters), and opens the
+same review: nothing is posted until you press `y`. The last N is remembered.
 
 First time it asks for your warframe.market session token: log in on
 warframe.market in your browser, F12 → Application/Storage → Cookies →
